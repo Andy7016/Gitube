@@ -1,4 +1,5 @@
 # Gitube
+<img width="4096" height="1846" alt="CleanShot 2026-10-10 at 11 22 35@2x" src="https://github.com/user-attachments/assets/07972e36-2e70-4ccd-9b78-15614c01a357" />
 
 像刷 B 站 / YouTube 一样刷 GitHub 开源项目。用 GitHub 账号登录后，首页按你的兴趣一屏一屏推项目，看到喜欢的可以一键 Star、收藏、稍后再看。
 
