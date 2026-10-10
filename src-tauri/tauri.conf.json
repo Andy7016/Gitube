@@ -1,0 +1,46 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Gitube",
+  "version": "0.1.0",
+  "identifier": "io.github.andy7016.gitube",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Gitube",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 400,
+        "minHeight": 560,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "像刷视频一样刷 GitHub 开源项目",
+    "longDescription": "Gitube 根据你 Star 过的项目和兴趣推荐 GitHub 开源项目，支持一键 Star、收藏夹、稍后再看。",
+    "copyright": "© 2026 Andy7016",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

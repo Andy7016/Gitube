@@ -1,0 +1,22 @@
+[package]
+name = "gitube"
+version = "0.1.0"
+description = "Gitube：像刷 B 站 / YouTube 一样刷 GitHub 开源项目"
+authors = ["Andy7016"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# 名字和包名不同，避免 Windows 上 cargo 的一个已知问题
+name = "gitube_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# 让 target="_blank" 的链接用系统默认浏览器打开
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
