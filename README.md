@@ -1,10 +1,28 @@
-# Gitube
-<img width="4096" height="1846" alt="CleanShot 2026-10-10 at 11 22 35@2x" src="https://github.com/user-attachments/assets/07972e36-2e70-4ccd-9b78-15614c01a357" />
+<p align="center">
+  <img src="docs/banner.png" alt="Gitube：像刷视频一样刷 GitHub" width="100%">
+</p>
 
-像刷 B 站 / YouTube 一样刷 GitHub 开源项目。用 GitHub 账号登录后，首页按你的兴趣一屏一屏推项目，看到喜欢的可以一键 Star、收藏、稍后再看。
+<p align="center">
+  <a href="https://andy7016.github.io/Gitube/"><b>打开网页版</b></a>
+  &nbsp;|&nbsp;
+  <a href="https://github.com/Andy7016/Gitube/releases/latest"><b>下载桌面版</b></a>
+  &nbsp;|&nbsp;
+  <a href="README.en.md">English</a>
+</p>
 
-- **网页版**：https://andy7016.github.io/Gitube/ ，打开就能用
-- **桌面版**：在 [Releases](https://github.com/Andy7016/Gitube/releases) 下载 Mac / Windows / Linux 安装包
+<p align="center">
+  <a href="https://github.com/Andy7016/Gitube/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/Andy7016/Gitube?color=F5A800&label=%E7%89%88%E6%9C%AC"></a>
+  <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/Andy7016/Gitube?label=%E5%8D%8F%E8%AE%AE"></a>
+  <img alt="支持的平台" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-%E7%BD%91%E9%A1%B5%20%7C%20macOS%20%7C%20Windows%20%7C%20Linux-161B26">
+</p>
+
+**Gitube** 让你像刷 B 站 / YouTube 一样刷 GitHub 开源项目：用 GitHub 账号登录后，首页按你的兴趣一屏一屏推项目，看到喜欢的可以一键 Star、收藏、稍后再看。
+
+完全开源，没有自己的服务器：你的 Token 只保存在你的设备上，所有请求都直接发给 GitHub。
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/07972e36-2e70-4ccd-9b78-15614c01a357" alt="Gitube 界面截图" width="100%">
+</p>
 
 ## 功能
 
@@ -130,3 +148,7 @@ vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
 - **Star 失败，提示权限不够**：Token 没勾 `public_repo`。重新生成一个再登录。
 - **头像、封面图显示不出来**：图片来自 `avatars.githubusercontent.com` 等域名，加载失败时会自动换成首字母头像和自动生成的封面。
 - **桌面版发布失败，提示 Resource not accessible by integration**：到仓库 Settings → Actions → General → Workflow permissions，选 Read and write permissions。
+
+## 开源协议
+
+[MIT](LICENSE)

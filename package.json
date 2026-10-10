@@ -3,6 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "description": "Gitube：像刷 B 站 / YouTube 一样刷 GitHub 开源项目",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Andy7016/Gitube.git"
+  },
+  "homepage": "https://andy7016.github.io/Gitube/",
   "type": "module",
   "scripts": {
     "dev": "vite",
