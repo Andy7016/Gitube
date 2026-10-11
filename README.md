@@ -21,7 +21,7 @@
 完全开源，没有自己的服务器：你的 Token 只保存在你的设备上，所有请求都直接发给 GitHub。
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/07972e36-2e70-4ccd-9b78-15614c01a357" alt="Gitube 界面截图" width="100%">
+  <img src="docs/screenshot.png" alt="Gitube 界面截图" width="100%">
 </p>
 
 ## 功能

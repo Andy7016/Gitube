@@ -23,7 +23,7 @@ It is fully open source and has no server of its own: your token stays on your d
 > The interface is currently in Chinese. An English UI is on the roadmap.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/07972e36-2e70-4ccd-9b78-15614c01a357" alt="Gitube screenshot" width="100%">
+  <img src="docs/screenshot.png" alt="Gitube screenshot" width="100%">
 </p>
 
 ## Features
