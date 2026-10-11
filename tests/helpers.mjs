@@ -49,6 +49,7 @@ export async function fixture(t, options = {}) {
     },
     fetchImpl,
     configStore: options.configStore ?? memoryConfigStore(),
+    oauthConfigStore: options.oauthConfigStore ?? memoryConfigStore(),
     graphStore: options.graphStore ?? memoryGraphStore(),
     authDiagnostics: options.authDiagnostics ?? ((diagnostic) => authDiagnostics.push(diagnostic)),
     ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),

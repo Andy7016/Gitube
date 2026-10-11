@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { isAbort, repoCache, setStarred } from '../api/github'
+import { GitHubError, isAbort, repoCache, setStarred } from '../api/github'
 import type { Repo } from '../api/types'
 import { useAuth } from './auth'
 import { useLibrary } from './library'
-import { toast, toastError } from './toast'
+import { toast, toastError, useToasts } from './toast'
 interface StarEntry { starred:boolean;stars:number }
 interface StarState {
  overrides:Record<string,StarEntry>;pending:Record<string,boolean>
@@ -25,7 +25,16 @@ export const useStars=create<StarState>((set,get)=>{
    if(want)useLibrary.getState().addEvent('star',repo)
    if(!silent)toast(want?`已 Star ${repo.name}`:`已取消 Star ${repo.name}`)
    return result.starred
-  }catch(error){if(current===version&&!isAbort(error))toastError(error);return previous.starred}
+  }catch(error){
+   if(current===version&&!isAbort(error)){
+    if(error instanceof GitHubError&&error.code==='STAR_OAUTH_REQUIRED'){
+     useToasts.getState().push({text:error.message,tone:'error',action:{label:'启用站内 Star',onClick:()=>window.location.assign('/api/setup/oauth')}})
+    }else if(error instanceof GitHubError&&error.code==='STAR_PERMISSION_REQUIRED'){
+     useToasts.getState().push({text:error.message,tone:'error',action:{label:'在 GitHub 打开',onClick:()=>window.open(`https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`,'_blank','noopener,noreferrer')}})
+    }else toastError(error)
+   }
+   return previous.starred
+  }
   finally{if(current===version){const {[repo.id]:_drop,...rest}=get().pending;set({pending:rest})}}
  }
  return {overrides:{},pending:{},toggle:repo=>apply(repo,!(get().overrides[repo.id]?.starred??repo.viewerHasStarred)),ensureStarred:repo=>apply(repo,true,true),reset(){++version;set({overrides:{},pending:{}})}}

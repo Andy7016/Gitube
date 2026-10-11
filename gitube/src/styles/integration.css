@@ -35,3 +35,32 @@
 .gitube-graph .tg-relation-heading > strong { color: var(--ink); }
 .gitube-graph .tg-reference-url > a { color: var(--blue); }
 .gitube-graph .tg-evidence-list li > .tg-relation-reason { color: var(--ink-2); }
+
+.feed-tools--recommend { align-items: flex-start; justify-content: space-between; gap: 12px; margin: 2px 0 20px; }
+.feed-tools--recommend > .text-btn { flex: none; margin-top: 7px; }
+.recommend-mode { min-width: 0; }
+.recommend-mode__buttons { flex-wrap: wrap; border-radius: 12px; max-width: 100%; }
+.recommend-mode__buttons .segmented__item { border-radius: 9px; font-size: 13px; padding: 0 12px; }
+.recommend-mode__buttons .segmented__item[aria-pressed=true] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px #0001; }
+.recommend-mode__buttons .segmented__item:disabled { opacity: .45; cursor: not-allowed; }
+.recommend-mode__hint { color: var(--ink-2); font-size: 12px; line-height: 1.7; margin: 7px 0 0; max-width: 700px; }
+.recommend-mode__hint a { color: var(--blue); margin-left: 6px; }
+.following-weights__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.following-weights__heading h2 { margin: 0; }
+.following-weights__heading > button { flex: none; font-size: 12px; }
+.following-weights__list { display: flex; flex-direction: column; gap: 16px; }
+.following-weights__list > button { align-self: flex-start; font-size: 12px; }
+.following-weight { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.following-weight__person { display: flex; flex-direction: column; min-width: 100px; flex: 1; }
+.following-weight__person > a { color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.following-weight__person > span { color: var(--ink-3); font-size: 12px; }
+.following-weight__control { display: flex; align-items: center; gap: 12px; width: min(45%, 240px); }
+.following-weight__control input { width: 100%; min-width: 0; accent-color: var(--blue); cursor: pointer; }
+.following-weight__control output { min-width: 3.5em; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+@media(max-width:720px) {
+  .feed-tools--recommend { flex-wrap: wrap; gap: 4px; }
+  .feed-tools--recommend > .text-btn { margin: 0 0 0 auto; }
+  .recommend-mode__buttons .segmented__item { padding: 0 9px; font-size: 12px; gap: 4px; }
+  .following-weight { flex-wrap: wrap; gap: 8px; }
+  .following-weight__control { width: 100%; margin-left: 40px; }
+}

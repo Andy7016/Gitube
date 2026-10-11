@@ -8,6 +8,7 @@ const messages: Record<string, string> = {
   exchange_timeout: 'GitHub 授权服务响应超时，请重新登录。',
   exchange_upstream: 'GitHub 授权服务暂时不可用，请稍后重新登录。',
   exchange_rejected: 'GitHub 未接受这次授权，请重新登录；若仍失败，请检查应用连接配置。',
+  exchange_insufficient_scope: 'GitHub 未授予公开项目的 Star 权限，请返回连接设置重新授权。',
   exchange_invalid_response: 'GitHub 授权服务返回异常，请稍后重新登录。',
   identity_connection: '无法连接 GitHub 读取账号信息，请检查网络后重新登录。',
   identity_timeout: '读取 GitHub 账号信息超时，请重新登录。',
@@ -16,6 +17,7 @@ const messages: Record<string, string> = {
   identity_forbidden: 'GitHub 未允许读取账号信息，请检查应用授权后重新登录。',
   identity_invalid_response: 'GitHub 返回的账号信息不完整，请稍后重新登录。',
   session_failed: '登录会话保存失败，请稍后重新登录。',
+  oauth_configuration_failed: 'OAuth 连接保存失败，请返回连接设置重试。',
   // Older callbacks may still be open while a new app version is loaded.
   exchange_failed: 'GitHub 授权未完成，请重新登录。',
   unavailable: '暂时无法连接 GitHub 或完成登录，请检查网络后重新登录。',

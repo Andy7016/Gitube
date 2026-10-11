@@ -21,3 +21,11 @@
 图谱的多层呈现采用独立分支与摄像机聚焦，节点面积表达真实 topic 重合度，至少 30% 时标注名称；语言回退不显示为 topic 百分比。补充决定见 [ADR 0008](docs/adr/0008-graph-branches-and-camera.md)，采集范围与显示上限保持不变。
 
 README 的 Related、版权 / 许可证归属链接也参与一级发现；技术箭头依据明确局部文档证据从提供方指向使用方，未知或冲突关系无向。采集路径、结构层级与技术流向分别记录，新语义缓存版本为 2。规则、边界与取舍见 [ADR 0009](docs/adr/0009-readme-evidence-and-technical-flow.md)。
+
+推荐控制已按 2026-10-11 新要求扩展：每位关注者的正常推荐权重可调，前台有效阅读提供小幅反馈；正常 / 换换口味 / 完全随机模式互斥切换，探索模式仍统计浏览偏好。换口味默认目标约各半、允许短缺互补，完全随机限定于真实检索候选池；各模式游标隔离。初始参数与实验边界见 [ADR 0010](docs/adr/0010-recommendation-controls-and-reading-signals.md)。
+
+Star 非限流权限拒绝的同身份兼容与真实错误状态见 [ADR 0011](docs/adr/0011-star-write-compatibility.md)。本次页面运行内恢复各推荐模式进度与技术图谱工作区，返回不自动重搜 / 重分析；刷新视为再次启动，范围见 [ADR 0012](docs/adr/0012-resumable-feed-and-graph-workspaces.md)。
+
+2026-10-11 预览重启后发现另一种 OAuth 传输故障：正常联网权限下 Node 直连 `github.com` 超时，而本机已启用的系统代理可连。当前 5173 预览仅在进程环境使用该现有本地代理，以 `--use-env-proxy` 启动；未改系统或 App 配置。后续接管启动需核对实际服务的 GitHub 兑换连接，保留可用联网 / 代理上下文；单独公开搜索成功不足以证明 `github.com` 认证可达。证据与边界见 [验收](docs/acceptance.md)。
+
+用户随后确认登录成功但 Star 仍被拒绝；公开 App 权限已核对正确，不能将接口兼容视为完整修复。本机增加独立 OAuth App 网页接入，授权 / 身份确认后保存新连接，原 App 凭据保留；正式部署仍以维护者显式环境配置优先。用户完成接入后已确认真实 Star 和取消 Star 均成功，当前账号的故障验收闭环。范围与平台注册步骤见 [ADR 0013](docs/adr/0013-oauth-connection-for-public-stars.md)，结果见 [验收记录](docs/acceptance.md)。

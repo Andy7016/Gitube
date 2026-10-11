@@ -8,6 +8,8 @@
 | GET `/api/auth/github` | 已连接则跳转 GitHub 授权；未连接则进入 `/api/setup/github` |
 | GET `/api/setup/github` | 仅本机开发：自动向 GitHub 提交 App manifest 的 HTML 页面 |
 | GET `/api/setup/callback?code=&state=` | 校验注册 state，兑换 code、持久保存连接，然后进入授权流程 |
+| GET `/api/setup/oauth` | 仅本机开发：OAuth App 连接向导、GitHub 注册入口和站点 / 回调地址；已有连接只提供重新授权，不回填 secret |
+| POST `/api/setup/oauth` | 同源 CSRF；JSON `{clientId,clientSecret}` 暂存十分钟候选配置，返回固定 `{next:'/api/auth/github'}`；授权 scope 与身份成功后才保存 |
 | GET `/api/auth/callback` | 交换授权码，成功跳转 `/`；失败 `/?auth_error=<code>` |
 | POST `/api/logout` | 清除会话，204 |
 | POST `/api/gitube` | Gitube 的受限具名操作，返回 `{data,meta?}`；查询也需 CSRF，匿名可 searchMany / repository，其他操作需登录 |
@@ -20,6 +22,10 @@
 | GET `/api/starred/:owner/:repo` | `{starred:boolean}` |
 | PUT `/api/starred/:owner/:repo` | 登录后 Star，204 |
 | DELETE `/api/starred/:owner/:repo` | 登录后取消 Star，204 |
+
+Star 写入先使用空正文 REST 请求，仅确认 204 才提交成功。非限流权限 403 可通过同一服务端用户 Token 执行一次固定 GraphQL 仓库查询及必要的 `addStar` / `removeStar`；目标必须为匹配全名的公开 Repository，mutation 结果必须确认目标及最终状态。401、标准限流及网络 / 不确定写入失败不切换接口重复写入。专用错误：403 `STAR_PERMISSION_REQUIRED` 保留账号与原 Star 状态、前端提供 GitHub 原仓库入口；502 `STAR_STATE_UNCONFIRMED` 表示未确认最终状态；404 `STAR_TARGET_UNAVAILABLE` 表示不存在、非公开或不可访问。成功后才更新会话 Star 缓存并失效画像。见 [ADR 0011](adr/0011-star-write-compatibility.md)。
+
+可本机设置的 GitHub App 身份仍被拒绝时，返回 403 `STAR_OAUTH_REQUIRED`，前端提供“启用站内 Star”进入 OAuth 向导。完整显式环境配置优先于本机 OAuth 连接和原 App 连接，网页不能覆盖维护者配置或已保存 OAuth 连接。候选配置绑定该次 OAuth state / PKCE，仅在实际 grant 包含公开 Star scope 且身份有效后独占保存到新的 `.local/github-oauth.json`；不足返回 `exchange_insufficient_scope`，保存失败返回 `oauth_configuration_failed`。原 App 文件不修改，候选 / Token / secret 不出现在响应或日志中。见 [ADR 0013](adr/0013-oauth-connection-for-public-stars.md)。
 
 OAuth 失败码按阶段划分：`exchange_*` 是授权码兑换，`identity_*` 是读取账号，`session_failed` 是会话保存。`connection` / `timeout` 表示该阶段连接失败 / 超时，`upstream` 表示上游服务或限流，`rejected` / `unauthorized` / `forbidden` 表示授权拒绝、凭据失效或权限拒绝，`invalid_response` 表示返回格式异常。前端显示固定中文说明，不回显未知查询参数。诊断日志仅包含固定阶段 / 分类、HTTP 状态及传输错误码白名单；不包含原始异常、客户端密钥、授权码、state、Token 或上游正文。兑换 POST 不自动重试，用户重新发起登录取得新的授权码。
 
@@ -47,6 +53,6 @@ Star 通过带时间戳的媒体类型分页读取，owned 从 `/users/{login}/r
 
 项目详情仅支持公开仓库。owner/repo 严格校验，服务端只调用 GitHub 的仓库资料与 README 固定端点，不抓取调用者提供的 URL。README 原文以 UTF-8 完整解码，最大 2 MiB；超限或无效格式返回显式 `readmeError`，不静默截断。仓库不存在返回 404；README 不存在时为 `readme:null,readmeError:null`；README 临时错误保留项目资料，401 则清理登录会话并返回错误。
 
-已确认公开仓库的 README 若被 GitHub App 权限拒绝，可匿名重试公开端点；不新增 Contents 权限，401 与限流不回退。完整结果按仓库及 Token 摘要缓存五分钟，最多 128 项，同一请求合并；部分错误不缓存，`refresh=1` 绕过已完成缓存。`viewer_starred` 由当前会话单独补充，不写入详情缓存；状态读取暂时失败时字段缺省，Star 写入前再次核对真实状态。响应保持 `Cache-Control: no-store`。
+已确认公开仓库的 README 若被 GitHub App 权限拒绝，可匿名重试公开端点；不新增 Contents 权限，401 与限流不回退。完整结果按仓库及 Token 摘要缓存五分钟，最多 128 项，同一请求合并；部分错误不缓存，`refresh=1` 绕过已完成缓存。`viewer_starred` 由当前会话单独补充，不写入详情缓存；状态读取暂时失败时字段缺省，Star 写入以接口确认结果为准。响应保持 `Cache-Control: no-store`。
 
 图谱的 GraphJob / GraphResult、来源证据与边界详见 [图谱合同](graph-contract.md)。任务只自动处理一级，按真实阶段推进 progress；所有 API 响应 no-store。公开结果单独持久缓存，不含 Token、会话 ID、原始源码或 viewer_starred；强制刷新有冷却，队列、请求预算与时间均有上限。

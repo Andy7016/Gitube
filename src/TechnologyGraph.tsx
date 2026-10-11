@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronUp, ExternalLink, Focus, GitBranch, Github, LoaderCircle, Maximize2, Minimize2, Network, RefreshCw, RotateCcw, Scan, Search, Star, ZoomIn, ZoomOut } from 'lucide-react';
 import { formatNumber, projectPath, safeUrl } from './data';
-import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, canonicalId, evidenceLabels, graphPath, graphTime, layoutGraph, mergeGraph, parseRepository, phaseLabels, type GraphEdge, type GraphEvidence, type GraphJob, type GraphWorkspace, type WorkspaceNode } from './graph-data';
+import { MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, canonicalId, evidenceLabels, graphPath, graphTime, layoutGraph, parseRepository, phaseLabels, type GraphEdge, type GraphEvidence, type GraphJob, type GraphWorkspace, type WorkspaceNode } from './graph-data';
+import { graphWorkspaceCache, initialGraphView, restoreGraphCamera, type GraphCamera, type GraphCanvasSize, type GraphRequestLease, type GraphWorkspaceView as SavedGraphView } from './graph-workspace-cache';
 import { relationFromEvidence, type GraphRelation } from '../shared/graph-relations.mjs';
 import './graph.css';
 
@@ -45,8 +46,8 @@ export function GraphRelationLine({ edge, markerId, emphasis, sourceName = edge.
 }
 
 type GraphPoint = { x: number; y: number; radius: number; parentId?: string };
-type Camera = { x: number; y: number; scale: number; mode: 'overview' | 'focus' | 'manual'; focusId?: string; fitAll?: boolean };
-type CanvasSize = { width: number; height: number };
+type Camera = GraphCamera;
+type CanvasSize = GraphCanvasSize;
 type LabelBox = { x: number; y: number; width: number; height: number };
 type NodeLabel = LabelBox & { lines: string[]; fontSize: number; lineHeight: number; leader?: { x: number; y: number } };
 const INITIAL_CAMERA: Camera = { x: 0, y: 0, scale: 1, mode: 'focus' };
@@ -133,23 +134,34 @@ export function placeGraphLabels(nodes: WorkspaceNode[], positions: Map<string, 
 }
 
 export default function TechnologyGraph(props: Props) {
+  const fullName = props.owner && props.name ? `${props.owner}/${props.name}` : props.embedded ? '' : graphWorkspaceCache.latestWorkbenchRoot(props.account);
+  const parsed = parseRepository(fullName);
+  return <GraphWorkspaceView key={JSON.stringify([props.account, canonicalId(fullName), !!props.embedded])} {...props} owner={parsed?.owner} name={parsed?.name} />;
+}
+
+function GraphWorkspaceView(props: Props) {
   const rootFullName = props.owner && props.name ? `${props.owner}/${props.name}` : '', root = canonicalId(rootFullName);
-  const [graph, setGraph] = useState<GraphWorkspace | null>(null), [job, setJob] = useState<GraphJob | null>(null), [busy, setBusy] = useState(false), [target, setTarget] = useState(''), [error, setError] = useState(''), [cached, setCached] = useState(false);
-  const [analyzed, setAnalyzed] = useState<string[]>([]), [selectedId, setSelectedId] = useState(root), [expanded, setExpanded] = useState(true), [tab, setTab] = useState<'sources' | 'nodes' | 'people'>('sources'), [input, setInput] = useState(rootFullName), [inputError, setInputError] = useState('');
-  const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA), [viewScope, setViewScope] = useState<'selection' | 'all'>('selection'), [focusRequest, setFocusRequest] = useState({ id: root, revision: 0, fitAll: true }), [canvasSize, setCanvasSize] = useState<CanvasSize>({ width: 600, height: 300 }), [fullscreen, setFullscreen] = useState(false), [notice, setNotice] = useState('');
-  const graphRef = useRef<GraphWorkspace | null>(null), controllerRef = useRef<AbortController | null>(null), version = useRef(0), busyRef = useRef(false), frameRef = useRef<HTMLDivElement>(null), canvasRef = useRef<HTMLDivElement>(null), inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const surface = props.embedded ? 'embedded' : 'workbench';
+  const [initial] = useState(() => graphWorkspaceCache.read(props.account, root, surface));
+  const initialView = initial?.view || initialGraphView(rootFullName);
+  const [graph, setGraph] = useState<GraphWorkspace | null>(initial?.graph || null), [job, setJob] = useState<GraphJob | null>(initial?.job || null), [busy, setBusy] = useState(false), [target, setTarget] = useState(initial?.target || ''), [error, setError] = useState(initial?.error || ''), [cached, setCached] = useState(initial?.cached || false);
+  const [analyzed, setAnalyzed] = useState<string[]>(initial?.analyzed || []), [selectedId, setSelectedId] = useState(initialView.selectedId), [expanded, setExpanded] = useState(initialView.expanded), [tab, setTab] = useState(initialView.tab), [input, setInput] = useState(initialView.input), [inputError, setInputError] = useState(''), [openDetails, setOpenDetails] = useState(initialView.openDetails);
+  const [camera, setCamera] = useState<Camera>(initialView.camera), [viewScope, setViewScope] = useState(initialView.viewScope), [focusRequest, setFocusRequest] = useState({ id: initialView.selectedId, revision: 0, fitAll: true }), [canvasSize, setCanvasSize] = useState<CanvasSize>(initialView.canvasSize), [fullscreen, setFullscreen] = useState(false), [notice, setNotice] = useState(''), [paused, setPaused] = useState({ target: initial?.pausedTarget || '', refresh: initial?.pausedRefresh || false });
+  const graphRef = useRef<GraphWorkspace | null>(initial?.graph || null), controllerRef = useRef<AbortController | null>(null), leaseRef = useRef<GraphRequestLease | null>(null), version = useRef(0), busyRef = useRef(false), frameRef = useRef<HTMLDivElement>(null), canvasRef = useRef<HTMLDivElement>(null), inspectorScrollRef = useRef<HTMLDivElement>(null);
+  const savedView = useRef<SavedGraphView>(initialView), cameraSize = useRef(initialView.canvasSize);
+  savedView.current = { selectedId, camera, canvasSize, viewScope, tab, expanded, input, openDetails };
   const callbacks = useRef(props); callbacks.current = props;
-  const drag = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; scale: number; moved: boolean } | null>(null), suppressClickUntil = useRef(0), appliedFocus = useRef(-1), markerId = useId().replace(/:/g, '');
+  const drag = useRef<{ pointerId: number; x: number; y: number; cameraX: number; cameraY: number; scale: number; moved: boolean } | null>(null), suppressClickUntil = useRef(0), appliedFocus = useRef(initial?.graph ? 0 : -1), markerId = useId().replace(/:/g, '');
   async function analyze(fullName: string, refresh = false) {
     if (busyRef.current || !props.csrfToken) return;
     const parsed = parseRepository(fullName); if (!parsed) return;
     const node = graphRef.current?.nodes.find(item => item.id === canonicalId(fullName));
     if (node && node.id !== root && node.depth >= MAX_GRAPH_DEPTH) { setNotice(`已达到 ${MAX_GRAPH_DEPTH} 层上限。可以将此节点设为新的根仓库。`); return; }
     if (node && node.id !== root && (graphRef.current?.nodes.length || 0) >= MAX_GRAPH_NODES) { setNotice(`已达到 ${MAX_GRAPH_NODES} 个节点上限。可以另开一个根仓库。`); return; }
-    const controller = new AbortController(), request = ++version.current, started = Date.now(); controllerRef.current?.abort(); controllerRef.current = controller; busyRef.current = true;
-    setBusy(true); setTarget(canonicalId(fullName)); setJob(null); setError(''); setNotice(''); setCached(false);
+    const controller = new AbortController(), request = ++version.current, started = Date.now(), lease = graphWorkspaceCache.begin(props.account, rootFullName, fullName, refresh); controllerRef.current?.abort(); controllerRef.current = controller; leaseRef.current = lease; busyRef.current = true;
+    setBusy(true); setPaused({ target: '', refresh: false }); setTarget(canonicalId(fullName)); setJob(null); setError(''); setNotice(''); setCached(false);
     let timedOut = false; const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, MAX_WAIT);
-    const current = () => request === version.current && !controller.signal.aborted;
+    const current = () => request === version.current && !controller.signal.aborted && graphWorkspaceCache.isCurrent(lease);
     try {
       let response = await graphRequest(`/api/graph/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': props.csrfToken }, body: JSON.stringify({ refresh }) }, controller.signal);
       if (!current()) return; setCached(response.cached); setJob(response.job);
@@ -159,28 +171,47 @@ export default function TechnologyGraph(props: Props) {
         await wait(POLL_INTERVAL, controller.signal); response = await graphRequest(`/api/graph/jobs/${encodeURIComponent(response.job.id)}`, {}, controller.signal); polls += 1;
         if (!current()) return; setJob(response.job);
       }
-      if (response.job.error?.code === 'SESSION_EXPIRED') { callbacks.current.onSessionExpired(); return; }
-      if (response.job.result) {
-        const previous = canonicalId(fullName) === root && refresh ? null : graphRef.current;
-        const next = mergeGraph(previous, response.job.result); graphRef.current = next; setGraph(next);
-        setAnalyzed(previous => [...new Set([...(canonicalId(fullName) === root && refresh ? [] : previous), canonicalId(fullName)])]); setSelectedId(canonicalId(fullName));
-        setViewScope('selection'); setFocusRequest(value => ({ id: canonicalId(fullName), revision: value.revision + 1, fitAll: !previous }));
+      if (response.job.error?.code === 'SESSION_EXPIRED') { graphWorkspaceCache.fail(lease, 'GitHub 会话已失效，请重新登录。'); callbacks.current.onSessionExpired(); return; }
+      const previous = graphRef.current, finished = graphWorkspaceCache.finish(lease, response.job, response.cached);
+      if (!finished) throw new Error('图谱响应与当前分析仓库不匹配，请重试。');
+      setError(finished.error);
+      if (response.job.result && response.job.status !== 'failed') {
+        graphRef.current = finished.graph; setGraph(finished.graph); setAnalyzed(finished.analyzed); setSelectedId(lease.target);
+        setViewScope('selection'); setFocusRequest(value => ({ id: lease.target, revision: value.revision + 1, fitAll: !previous || lease.target === root && refresh }));
+        savedView.current = { ...savedView.current, selectedId: lease.target, viewScope: 'selection' };
+        graphWorkspaceCache.saveView(props.account, rootFullName, surface, savedView.current);
       }
-      if (response.job.status === 'failed') setError(response.job.error?.message || '图谱分析失败，请重试。');
     } catch (failure) {
-      if (request !== version.current) return;
+      if (request !== version.current || !graphWorkspaceCache.isCurrent(lease)) return;
       const apiError = failure as GraphFailure;
-      if (apiError.status === 401 || apiError.code === 'SESSION_EXPIRED') { callbacks.current.onSessionExpired(); return; }
-      if (timedOut) setError('已停止等待：分析超过 120 秒。可重试读取，后台任务有独立期限。');
-      else if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : '图谱暂时无法加载。');
-    } finally { clearTimeout(deadline); if (request === version.current) { busyRef.current = false; setBusy(false); } }
+      if (apiError.status === 401 || apiError.code === 'SESSION_EXPIRED') { graphWorkspaceCache.fail(lease, 'GitHub 会话已失效，请重新登录。'); callbacks.current.onSessionExpired(); return; }
+      const message = timedOut ? '已停止等待：分析超过 120 秒。可重试读取，后台任务有独立期限。' : failure instanceof Error ? failure.message : '图谱暂时无法加载。';
+      if (timedOut || !controller.signal.aborted) { graphWorkspaceCache.fail(lease, message); setError(message); }
+    } finally { clearTimeout(deadline); if (request === version.current) { busyRef.current = false; controllerRef.current = null; leaseRef.current = null; setBusy(false); } }
   }
   useEffect(() => {
-    controllerRef.current?.abort(); version.current += 1; busyRef.current = false; graphRef.current = null;
-    setGraph(null); setJob(null); setBusy(false); setError(''); setNotice(''); setAnalyzed([]); setSelectedId(root); setTarget(''); setCached(false); setInput(rootFullName); setCamera(INITIAL_CAMERA); setViewScope('selection'); appliedFocus.current = -1;
-    if (rootFullName && props.csrfToken) void analyze(rootFullName);
-    return () => { controllerRef.current?.abort(); version.current += 1; busyRef.current = false; };
-  }, [root, props.account, props.csrfToken]);
+    if (!props.embedded && rootFullName) graphWorkspaceCache.rememberWorkbench(props.account, rootFullName);
+    return () => {
+      graphWorkspaceCache.saveView(props.account, rootFullName, surface, savedView.current);
+      controllerRef.current?.abort(); version.current += 1; busyRef.current = false;
+      if (leaseRef.current) graphWorkspaceCache.pause(leaseRef.current);
+    };
+  }, [root, props.account, surface]);
+  useEffect(() => { graphWorkspaceCache.saveView(props.account, rootFullName, surface, savedView.current); }, [root, props.account, surface, selectedId, camera, canvasSize, viewScope, tab, expanded, input, openDetails]);
+  useEffect(() => {
+    const stored = graphWorkspaceCache.read(props.account, root, surface);
+    if (stored?.pausedTarget) { setBusy(false); setPaused({ target: stored.pausedTarget, refresh: stored.pausedRefresh }); }
+    // StrictMode replays mount effects before this timer can submit a request.
+    const timer = setTimeout(() => {
+      if (!rootFullName || !props.csrfToken) return;
+      const refresh = surface === 'workbench' && graphWorkspaceCache.takeRefreshRequest(props.account, root);
+      if (refresh || !graphWorkspaceCache.read(props.account, root, surface)?.hasAttempted) void analyze(rootFullName, refresh);
+    }, 0);
+    return () => {
+      clearTimeout(timer); controllerRef.current?.abort(); version.current += 1; busyRef.current = false;
+      if (leaseRef.current) graphWorkspaceCache.pause(leaseRef.current);
+    };
+  }, [root, props.account, props.csrfToken, surface]);
   useEffect(() => { if (props.embedded) return; document.title = `${rootFullName ? `${rootFullName} · ` : ''}技术图谱 — RepoFlow`; }, [rootFullName, props.embedded]);
   useEffect(() => { const changed = () => setFullscreen(document.fullscreenElement === frameRef.current); document.addEventListener('fullscreenchange', changed); return () => document.removeEventListener('fullscreenchange', changed); }, []);
   useEffect(() => { const canvas = canvasRef.current; if (!canvas) return; const measure = () => { const svg = canvas.querySelector('svg.tg-svg'), bounds = (svg || canvas).getBoundingClientRect(); if (bounds.width && bounds.height) setCanvasSize(previous => previous.width === bounds.width && previous.height === bounds.height ? previous : { width: bounds.width, height: bounds.height }); }; measure(); if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure); } const observer = new ResizeObserver(measure); observer.observe(canvas); return () => observer.disconnect(); }, [expanded, !!rootFullName, !!graph]);
@@ -194,10 +225,11 @@ export default function TechnologyGraph(props: Props) {
   const overview = useMemo(() => fitCamera(graph?.nodes || [], positions, canvasSize), [graph?.nodes, positions, canvasSize]);
   useEffect(() => {
     if (!graph) return;
+    const previousSize = cameraSize.current; cameraSize.current = canvasSize;
     const requested = appliedFocus.current !== focusRequest.revision;
     if (requested) appliedFocus.current = focusRequest.revision;
     setCamera(previous => {
-      if (!requested && previous.mode === 'manual') return previous;
+      if (!requested && previous.mode === 'manual') return restoreGraphCamera(previous, previousSize, canvasSize);
       if (!requested && previous.mode === 'overview') return overview;
       const id = requested ? focusRequest.id : previous.focusId || graph.root, fitAll = requested ? focusRequest.fitAll : previous.fitAll;
       const point = positions.get(id); if (!point) return overview;
@@ -211,7 +243,8 @@ export default function TechnologyGraph(props: Props) {
   const labelPositions = useMemo(() => placeGraphLabels(graph?.nodes || [], positions, labelIds, branches, camera, canvasSize, density, selected?.id || '', comfortable), [graph?.nodes, positions, labelIds, branches, camera, canvasSize, density, selected?.id, comfortable]);
   const nodeRadius = (node: WorkspaceNode) => (positions.get(node.id)?.radius || 7) * (node.tier === 0 ? 1 : density) * worldPixel;
   const canExpand = !!selected && selected.id !== root && !analyzed.includes(selected.id) && selected.depth < MAX_GRAPH_DEPTH && (graph?.nodes.length || 0) < MAX_GRAPH_NODES;
-  function submit(event: FormEvent) { event.preventDefault(); const parsed = parseRepository(input); if (!parsed) { setInputError('请输入 owner/repo 或完整的 GitHub 仓库 URL。'); return; } setInputError(''); if (canonicalId(parsed.fullName) === root) void analyze(rootFullName, true); else props.onRoute(graphPath(parsed.fullName)); }
+  function submit(event: FormEvent) { event.preventDefault(); const parsed = parseRepository(input); if (!parsed) { setInputError('请输入 owner/repo 或完整的 GitHub 仓库 URL。'); return; } setInputError(''); if (canonicalId(parsed.fullName) === root) void analyze(rootFullName, true); else { graphWorkspaceCache.requestRefresh(props.account, parsed.fullName); props.onRoute(graphPath(parsed.fullName)); } }
+  function toggleDetail(key: string, open: boolean) { setOpenDetails(previous => previous.includes(key) === open ? previous : open ? [...previous, key] : previous.filter(item => item !== key)); }
   function focusSelected() { if (!selected) return; setViewScope('selection'); setFocusRequest(value => ({ id: selected.id, revision: value.revision + 1, fitAll: false })); }
   function select(node: WorkspaceNode) { setSelectedId(node.id); setTab('sources'); setViewScope('selection'); setFocusRequest(value => ({ id: node.id, revision: value.revision + 1, fitAll: false })); }
   function showOverview() { setViewScope('all'); setCamera(overview); }
@@ -227,12 +260,12 @@ export default function TechnologyGraph(props: Props) {
   }
   function pointerEnd(event: PointerEvent<SVGSVGElement>) { if (drag.current?.moved) suppressClickUntil.current = Date.now() + 250; drag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }
   async function toggleFullscreen() { if (document.fullscreenElement === frameRef.current) await document.exitFullscreen(); else if (frameRef.current?.requestFullscreen) { try { await frameRef.current.requestFullscreen(); } catch { setNotice('此浏览器未能进入全屏，可打开独立工作台查看。'); } } }
-  const coverage = job?.result?.counts, status = error ? '分析未完成' : busy ? job ? phaseLabels[job.phase] : '正在提交分析请求' : job?.status === 'partial' ? '部分分析完成' : job?.status === 'complete' ? cached ? '已读取缓存' : '一级分析完成' : props.csrfToken ? '等待分析' : '正在建立安全会话';
+  const coverage = job?.result?.counts, status = error ? '分析未完成' : busy ? job ? phaseLabels[job.phase] : '正在提交分析请求' : paused.target ? '上次分析已暂停' : job?.status === 'partial' ? '部分分析完成' : job?.status === 'complete' ? cached ? '已读取缓存' : '一级分析完成' : props.csrfToken ? '等待分析' : '正在建立安全会话';
   const inspector = <aside className="tg-inspector">
     <div className="tg-tabs" role="tablist" aria-label="图谱信息"><button role="tab" aria-selected={tab === 'sources'} onClick={() => setTab('sources')}>关系</button><button role="tab" aria-selected={tab === 'nodes'} onClick={() => setTab('nodes')}>节点 {graph?.nodes.length || 0}</button><button role="tab" aria-selected={tab === 'people'} onClick={() => setTab('people')}>人员 {graph?.people.length || 0}</button></div>
     <div className="tg-inspector-scroll" role="tabpanel" ref={inspectorScrollRef}>
       {tab === 'nodes' ? <ul className="tg-node-list">{[...(graph?.nodes || [])].sort((a, b) => a.tier - b.tier || a.depth - b.depth || a.id.localeCompare(b.id)).map(node => <li key={node.id}><button aria-label={`选择 ${node.repo.full_name}`} aria-pressed={selected?.id === node.id} onClick={() => select(node)}><i className={`tg-dot tier-${node.tier}`} /><span>{node.repo.full_name}<small>{node.depth === 0 ? '根仓库' : `手动链路第 ${node.depth} 层`}{analyzed.includes(node.id) ? ' · 已分析' : ''}</small></span></button></li>)}</ul> : tab === 'people' ? <div className="tg-people">
-        <p className="tg-muted">人员角色来自公开证据，不推断未列出的维护关系。</p>{graph?.people.map(person => <details className="person-evidence" key={person.login}><summary>{safeUrl(person.avatar_url) && <img src={safeUrl(person.avatar_url)!} alt="" loading="lazy" />}<span>{person.login}<small>{person.roles.map(role => evidenceLabels[role]).join(' · ')}</small></span></summary>{person.contributions !== null && <p className="tg-muted">公开贡献次数 {formatNumber(person.contributions)}</p>}<EvidenceList evidence={person.evidence} />{safeUrl(person.html_url) && <a className="tg-inline-link" href={safeUrl(person.html_url)!} target="_blank" rel="noopener noreferrer">GitHub 资料<ExternalLink size={11} /></a>}</details>)}
+        <p className="tg-muted">人员角色来自公开证据，不推断未列出的维护关系。</p>{graph?.people.map(person => <details className="person-evidence" key={person.login} open={openDetails.includes(`person:${person.login}`)} onToggle={event => toggleDetail(`person:${person.login}`, event.currentTarget.open)}><summary>{safeUrl(person.avatar_url) && <img src={safeUrl(person.avatar_url)!} alt="" loading="lazy" />}<span>{person.login}<small>{person.roles.map(role => evidenceLabels[role]).join(' · ')}</small></span></summary>{person.contributions !== null && <p className="tg-muted">公开贡献次数 {formatNumber(person.contributions)}</p>}<EvidenceList evidence={person.evidence} />{safeUrl(person.html_url) && <a className="tg-inline-link" href={safeUrl(person.html_url)!} target="_blank" rel="noopener noreferrer">GitHub 资料<ExternalLink size={11} /></a>}</details>)}
       </div> : selected ? <div className="tg-node-detail">
         <span className={`tg-tier tier-${selected.tier}`}>{selected.tier === 0 ? '中心仓库' : selected.tier === 1 ? 'README / 依赖链接' : '人员关联'} · {selected.depth === 0 ? '根' : `第 ${selected.depth} 层`}</span>
         <h3>{selected.repo.full_name}</h3>
@@ -254,6 +287,7 @@ export default function TechnologyGraph(props: Props) {
     {!rootFullName ? <div className="tg-start"><Network size={42} /><h3>选择一个 GitHub 仓库</h3><p>查看 README 引用、明确依赖与公开开发者关联。每次只分析一级，下一层由你继续追溯。</p></div> : <>
       <div className="tg-status"><CircleProgress job={job} busy={busy} /><div className="tg-status-copy" role="status"><strong>{status}</strong><span>{busy ? target : graph ? `${graph.nodes.length} 个节点 · ${graph.analyses.length} 次一级分析 · 数据时间 ${graphTime(graph.generatedAt)}` : rootFullName}</span>{job && <small>{job.message} · 请求预算 {job.requests}/{job.requestLimit}</small>}</div><button className="tg-refresh" disabled={busy || !props.csrfToken} onClick={() => void analyze(rootFullName, true)} aria-label="重新分析根仓库" title="重新分析根仓库"><RefreshCw size={15} /><span>刷新</span></button></div>
       {(error || props.sessionError || notice) && <div className="tg-message" role={error || props.sessionError ? 'alert' : 'status'}><span>{error || props.sessionError || notice}</span>{error && <button onClick={() => void analyze(target || rootFullName)}>重试分析</button>}{props.sessionError && !props.csrfToken && <button onClick={props.onSessionRetry}>重试会话</button>}</div>}
+      {paused.target && !busy && <div className="tg-message" role="status"><span>离开页面时已停止等待 {paused.target} 的分析。{graph ? '已完成的图谱与手动追溯记录仍保留。' : '本次尚无已完成结果。'}</span><button disabled={!props.csrfToken} onClick={() => void analyze(paused.target, paused.refresh)}>继续上次分析</button></div>}
       {expanded && <>
         <div className="tg-toolbar">
           <div className="tg-legend"><span><i className="tg-dot tier-0" />根仓库</span><span><i className="tg-dot tier-1" />README / 依赖链接</span><span><i className="tg-dot tier-2" />人员关联</span><span className="tg-size-legend">大小：topic 重合度</span></div>
@@ -288,7 +322,7 @@ export default function TechnologyGraph(props: Props) {
                 const point = positions.get(node.id); if (!point) return null;
                 const radius = nodeRadius(node), label = labelPositions.get(node.id), lines = label?.lines || nodeLabelLines(node.repo.name), branch = branches.has(node.id), persistent = labelIds.has(node.id), fontSize = label?.fontSize || 11, labelX = label ? label.x + 4 : 0, labelY = (label?.y ?? radius / worldPixel + 6) + fontSize;
                 return <g key={node.id} data-node-id={node.id} data-tier={node.tier} data-depth={node.depth} data-parent-id={point.parentId} data-overlap-method={node.overlap.method} data-overlap-score={node.overlap.score} className={`tg-node tier-${node.tier} ${selected?.id === node.id ? 'selected' : ''} ${analyzed.includes(node.id) ? 'analyzed' : ''} ${viewScope === 'selection' && !neighborhood.has(node.id) ? 'dimmed' : ''}`} transform={`translate(${point.x} ${point.y})`} role="button" tabIndex={0} aria-label={`选择 ${node.repo.full_name}`} aria-pressed={selected?.id === node.id} onClick={event => { if (event.detail === 0 || Date.now() > suppressClickUntil.current) select(node); }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(node); } }}>
-                  <title>{node.repo.full_name} · {node.depth ? `第 ${node.depth} 层` : '根仓库'} · {node.overlap.method === 'topics' ? `${Math.round(node.overlap.score * 100)}% topic 重合度` : node.overlap.method === 'language-fallback' ? '主要语言回退' : '无 topic 重合度'} · {formatNumber(node.repo.stargazers_count)} Stars</title>
+                  <title>{`${node.repo.full_name} · ${node.depth ? `第 ${node.depth} 层` : '根仓库'} · ${node.overlap.method === 'topics' ? `${Math.round(node.overlap.score * 100)}% topic 重合度` : node.overlap.method === 'language-fallback' ? '主要语言回退' : '无 topic 重合度'} · ${formatNumber(node.repo.stargazers_count)} Stars`}</title>
                   <circle className="tg-node-hit" r={Math.max(radius + 3 * worldPixel, (comfortable ? 14 : 8) * worldPixel)} fill="transparent" />
                   <circle className="tg-node-halo" r={radius + 4 * worldPixel} vectorEffect="non-scaling-stroke" />
                   <circle className="tg-node-core" r={radius} vectorEffect="non-scaling-stroke" />
@@ -305,7 +339,7 @@ export default function TechnologyGraph(props: Props) {
           <div className="tg-canvas-caption">{viewScope === 'all' ? '全图 · ' : selected ? `${selected.repo.name} 及直接相连项目 · ` : ''}拖动平移 · 名称常驻：topic ≥ 30%</div>
         </div>{inspector}</div>
       </>}
-      {(coverage || graph?.warnings.length) && <div className="tg-coverage">{coverage && <span>直接引用 {coverage.referencesResolved}/{coverage.referencesFound} · 人员 {coverage.peopleScanned}/{coverage.peopleFound} · 已查候选 {coverage.candidatesScanned}</span>}{graph && graph.warnings.length > 0 && <details><summary>{graph.warnings.length} 条覆盖提示</summary><ul>{graph.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}</div>}
+      {(coverage || graph?.warnings.length) && <div className="tg-coverage">{coverage && <span>直接引用 {coverage.referencesResolved}/{coverage.referencesFound} · 人员 {coverage.peopleScanned}/{coverage.peopleFound} · 已查候选 {coverage.candidatesScanned}</span>}{graph && graph.warnings.length > 0 && <details open={openDetails.includes('warnings')} onToggle={event => toggleDetail('warnings', event.currentTarget.open)}><summary>{graph.warnings.length} 条覆盖提示</summary><ul>{graph.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}</div>}
     </>}
   </section>;
 }

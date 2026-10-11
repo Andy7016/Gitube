@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { isRepo } from '../api/validate'
 import type { Repo } from '../api/types'
+import { INTEREST_BY_ID } from '../lib/interests'
 
 /**
  * 「我的」数据：收藏夹、稍后再看、历史记录、推荐反馈。
@@ -22,7 +23,8 @@ export interface Folder {
   items: SavedItem[]
 }
 
-export type EventKind = 'star' | 'save' | 'later' | 'open' | 'dislike'
+export type EventKind = 'star' | 'save' | 'later' | 'open' | 'dislike' | 'dwell'
+export type RecommendationMode = 'normal' | 'taste' | 'random'
 
 export interface FeedbackEvent {
   kind: EventKind
@@ -40,6 +42,11 @@ export interface LibraryData {
   version: 1
   onboarded: boolean
   interests: string[]
+  recommendationMode: RecommendationMode
+  /** 小写 GitHub login；省略为 1，0 停用其推荐影响。 */
+  followingWeights: Record<string, number>
+  /** 小写 owner/repo；同账号同仓库一天只计一次有效逗留。 */
+  engagementAt: Record<string, number>
   folders: Folder[]
   later: SavedItem[]
   history: SavedItem[]
@@ -57,6 +64,9 @@ const emptyData = (): LibraryData => ({
   version: 1,
   onboarded: false,
   interests: [],
+  recommendationMode: 'normal',
+  followingWeights: {},
+  engagementAt: {},
   folders: [{ id: DEFAULT_FOLDER_ID, name: '默认收藏夹', createdAt: Date.now(), items: [] }],
   later: [],
   history: [],
@@ -71,6 +81,27 @@ const storageKey = (login: string) => `gitube:library:${login.toLowerCase()}`
 const SEEN_TTL = 3 * 24 * 3600_000
 const MAX_HISTORY = 300
 const MAX_EVENTS = 400
+const ENGAGEMENT_TTL = 24 * 3600_000
+const MAX_ENGAGEMENT = 1000
+const MAX_FOLLOWING_WEIGHTS = 1000
+
+function hasInterest(interests: string[], blockedTopics: string[]) {
+  return interests.some((id) => INTEREST_BY_ID.get(id)?.topics.some((topic) => !blockedTopics.includes(topic)))
+}
+
+const isMode = (value: unknown): value is RecommendationMode => value === 'normal' || value === 'taste' || value === 'random'
+const isWeight = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3
+const loginKey = (value: string) => value.trim().toLowerCase()
+const validLogin = (value: string) => /^[a-z0-9][a-z0-9-]{0,38}$/.test(value)
+
+function recentEngagement(value: unknown, now: number): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value)
+    .filter(([name, at]) => /^[^/\s]+\/[^/\s]+$/.test(name) && name.length <= 200 && typeof at === 'number' && Number.isFinite(at) && at <= now && now - at < ENGAGEMENT_TTL)
+    .sort((a, b) => (b[1] as number) - (a[1] as number))
+    .slice(0, MAX_ENGAGEMENT)
+    .map(([name, at]) => [name.toLowerCase(), at])) as Record<string, number>
+}
 
 function loadData(login: string): LibraryData {
   try {
@@ -83,15 +114,23 @@ function loadData(login: string): LibraryData {
     const items = (value: unknown): SavedItem[] => Array.isArray(value) ? value.filter((item): item is SavedItem => !!item && typeof item === 'object' && isRepo(item.repo) && (item.at === null || typeof item.at === 'number' && Number.isFinite(item.at))).slice(0, 1000) : []
     data.onboarded = parsed.onboarded === true
     for (const key of ['interests','dislikedRepos','blockedTopics','blockedLangs'] as const) data[key] = strings(parsed[key])
+    if (isMode(parsed.recommendationMode)) data.recommendationMode = parsed.recommendationMode
+    if (data.recommendationMode === 'taste' && !hasInterest(data.interests, data.blockedTopics)) data.recommendationMode = 'normal'
+    if (parsed.followingWeights && typeof parsed.followingWeights === 'object' && !Array.isArray(parsed.followingWeights)) {
+      data.followingWeights = Object.fromEntries(Object.entries(parsed.followingWeights)
+        .filter(([login, weight]) => validLogin(loginKey(login)) && isWeight(weight))
+        .slice(0, MAX_FOLLOWING_WEIGHTS).map(([login, weight]) => [loginKey(login), weight])) as Record<string, number>
+    }
+    data.engagementAt = recentEngagement(parsed.engagementAt, Date.now())
     data.later = items(parsed.later)
     data.history = items(parsed.history).slice(0,MAX_HISTORY)
     if (Array.isArray(parsed.folders)) data.folders = parsed.folders.filter((folder: Folder) => folder && typeof folder.id === 'string' && typeof folder.name === 'string' && typeof folder.createdAt === 'number').map((folder: Folder) => ({...folder,items:items(folder.items)})).slice(0,100)
     if (!data.folders.some(folder => folder.id === DEFAULT_FOLDER_ID)) data.folders.unshift(emptyData().folders[0])
-    if (Array.isArray(parsed.events)) data.events = parsed.events.filter((event: FeedbackEvent) => event && ['star','save','later','open','dislike'].includes(event.kind) && typeof event.at === 'number' && Number.isFinite(event.at) && Array.isArray(event.topics) && event.topics.every(topic => typeof topic === 'string') && (event.lang === null || typeof event.lang === 'string')).slice(0,MAX_EVENTS)
+    if (Array.isArray(parsed.events)) data.events = parsed.events.filter((event: FeedbackEvent) => event && ['star','save','later','open','dislike','dwell'].includes(event.kind) && typeof event.at === 'number' && Number.isFinite(event.at) && Array.isArray(event.topics) && event.topics.every(topic => typeof topic === 'string') && (event.lang === null || typeof event.lang === 'string')).slice(0,MAX_EVENTS)
     if (parsed.seen && typeof parsed.seen === 'object' && !Array.isArray(parsed.seen)) data.seen = Object.fromEntries(Object.entries(parsed.seen).filter(([,at]) => typeof at === 'number' && Number.isFinite(at))) as Record<string,number>
     // 清理过期的「已看过」记录
     const now = Date.now()
-    data.seen = Object.fromEntries(Object.entries(data.seen).filter(([, t]) => now - t < SEEN_TTL))
+    data.seen = Object.fromEntries(Object.entries(data.seen).filter(([, t]) => now - t < SEEN_TTL).map(([name, at]) => [name.toLowerCase(), at]))
     return data
   } catch {
     return emptyData()
@@ -102,6 +141,9 @@ const pickData = (s: LibraryState): LibraryData => ({
   version: 1,
   onboarded: s.onboarded,
   interests: s.interests,
+  recommendationMode: s.recommendationMode,
+  followingWeights: s.followingWeights,
+  engagementAt: s.engagementAt,
   folders: s.folders,
   later: s.later,
   history: s.history,
@@ -117,6 +159,9 @@ interface LibraryState extends LibraryData {
   load: (login: string) => void
   completeOnboarding: (interests: string[]) => void
   setInterests: (interests: string[]) => void
+  setRecommendationMode: (mode: RecommendationMode) => void
+  setFollowingWeight: (login: string, weight: number) => void
+  recordEngagement: (repo: Repo, expectedAccount: string) => boolean
 
   quickSave: (repo: Repo) => void
   setFolders: (repo: Repo, folderIds: string[]) => void
@@ -164,7 +209,35 @@ export const useLibrary = create<LibraryState>((set, get) => {
       set({ interests, onboarded: true })
     },
     setInterests(interests) {
-      set({ interests })
+      set({ interests, ...(get().recommendationMode === 'taste' && !hasInterest(interests, get().blockedTopics) ? { recommendationMode: 'normal' as const } : {}) })
+    },
+    setRecommendationMode(mode) {
+      if (!isMode(mode)) return
+      set({ recommendationMode: mode === 'taste' && !hasInterest(get().interests, get().blockedTopics) ? 'normal' : mode })
+    },
+    setFollowingWeight(login, weight) {
+      const key = loginKey(login)
+      if (!validLogin(key) || !isWeight(weight)) return
+      const weights = { ...get().followingWeights, [key]: weight }
+      set({ followingWeights: Object.fromEntries(Object.entries(weights).slice(-MAX_FOLLOWING_WEIGHTS)) })
+    },
+    recordEngagement(repo, expectedAccount) {
+      const state = get()
+      if (!state.login || state.login !== expectedAccount) return false
+      const now = Date.now()
+      const key = repo.nameWithOwner.toLowerCase()
+      const recent = recentEngagement(state.engagementAt, now)
+      const previous = recent[key]
+      if (typeof previous === 'number' && now - previous < ENGAGEMENT_TTL) return false
+      // 满额时暂停新信号，避免驱逐仍在24小时内的去重记录后重复计权。
+      if (Object.keys(recent).length >= MAX_ENGAGEMENT) {
+        set({ engagementAt: recent })
+        return false
+      }
+      const engagementAt = { ...recent, [key]: now }
+      const event: FeedbackEvent = { kind: 'dwell', topics: [...repo.topics], lang: repo.language, at: now }
+      set({ engagementAt, events: [event, ...state.events].slice(0, MAX_EVENTS) })
+      return true
     },
 
     quickSave(repo) {
@@ -248,7 +321,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set({ dislikedRepos: [...new Set([repo.nameWithOwner, ...s.dislikedRepos])].slice(0, 2000) })
         addEvent('dislike', repo)
       } else if (reason.type === 'topic') {
-        set({ blockedTopics: [...new Set([...s.blockedTopics, reason.topic])] })
+        const blockedTopics = [...new Set([...s.blockedTopics, reason.topic])]
+        set({ blockedTopics, ...(s.recommendationMode === 'taste' && !hasInterest(s.interests, blockedTopics) ? { recommendationMode: 'normal' as const } : {}) })
       } else {
         set({ blockedLangs: [...new Set([...s.blockedLangs, reason.lang])] })
       }
@@ -278,12 +352,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
     markSeen(names) {
       const now = Date.now()
       const seen = { ...get().seen }
-      for (const n of names) seen[n] = now
+      for (const n of names) seen[n.toLowerCase()] = now
       set({ seen })
     },
 
     resetRecommendations() {
-      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {} })
+      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, engagementAt: {}, followingWeights: {}, recommendationMode: 'normal' })
     },
   }
 })

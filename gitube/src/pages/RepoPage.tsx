@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { MouseEventHandler } from 'react'
 import { Link, useParams } from 'react-router'
 import {
   Bookmark,
@@ -27,6 +28,7 @@ import { StarButton } from '../components/StarButton'
 import { copyClone, quickSave, toggleLater } from '../lib/actions'
 import { formatCount, isoDaysAgo, timeAgo } from '../lib/format'
 import { TOPIC_STOPLIST } from '../lib/interests'
+import { useRepoEngagement } from '../lib/useRepoEngagement'
 import { useIsLater, useIsSaved, useLibrary } from '../store/library'
 import { useStars, useStarState } from '../store/stars'
 import { useSaveDialog } from '../store/ui'
@@ -86,7 +88,7 @@ function Related({ repo }: { repo: Repo }) {
   )
 }
 
-function ActionBar({ repo }: { repo: Repo }) {
+function ActionBar({ repo, onOpenOriginal }: { repo: Repo; onOpenOriginal: MouseEventHandler<HTMLAnchorElement> }) {
   const saved = useIsSaved(repo.nameWithOwner)
   const later = useIsLater(repo.nameWithOwner)
   const [copied, setCopied] = useState(false)
@@ -126,7 +128,7 @@ function ActionBar({ repo }: { repo: Repo }) {
         {copied ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
         clone
       </button>
-      <a className="pill" href={safeURL(repo.url)} target="_blank" rel="noreferrer">
+      <a className="pill" href={safeURL(repo.url)} target="_blank" rel="noreferrer" onClick={onOpenOriginal} onAuxClick={onOpenOriginal}>
         <ExternalLink size={18} aria-hidden="true" />
         打开原仓库
       </a>
@@ -206,6 +208,7 @@ export function RepoPage() {
   const ready=usePageReady()
   const cached = repoCache.get(nameWithOwner.toLowerCase()) ?? null
   const repo: Repo | null = detail ?? cached
+  const onOpenOriginal = useRepoEngagement(repo, nameWithOwner)
 
   useEffect(() => {
     let alive = true
@@ -293,7 +296,7 @@ export function RepoPage() {
             </a>
             <span>{repo.ownerType === 'Organization' ? '组织' : repo.ownerType === 'User' ? '个人开发者' : '仓库作者'}</span>
           </div>
-          <ActionBar repo={repo} />
+          <ActionBar repo={repo} onOpenOriginal={onOpenOriginal} />
         </div>
         <p className="watch__tip">长按 Star 一键三连：Star + 收藏 + 稍后再看</p>
         {error&&<div className="session-banner" role="alert"><span>{error}</span><button className="text-btn" onClick={()=>setRetry(n=>n+1)}>重试项目详情</button></div>}

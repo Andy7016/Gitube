@@ -5,11 +5,14 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { ApiError, buildSearch, githubRequest, mapConcurrent, normalizeRepo } from './github.mjs'
 import { createConfigStore } from './config.mjs'
+import { createOAuthConfigStore, validateOAuthConfig } from './oauth-config.mjs'
+import { oauthSetupPage } from './oauth-setup.mjs'
 import { createRecommendationService } from './recommendations.mjs'
 import { createRepositoryDetailsService } from './repository-details.mjs'
 import { createGraphService } from './graph-service.mjs'
 import { createGraphStore } from './graph-store.mjs'
 import { createGitubeApi } from './gitube-api.mjs'
+import { writeStar } from './star.mjs'
 
 const random = () => randomBytes(32).toString('base64url')
 const same = (a, b) => {
@@ -30,7 +33,7 @@ class OAuthFailure extends Error {
   constructor(stage, kind, { status, code } = {}) {
     super('GitHub OAuth failed')
     this.diagnostic = Object.freeze({ stage, kind, ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}), ...(transportCodes.has(code) ? { code } : {}) })
-    this.publicCode = stage === 'session' ? 'session_failed' : `${stage}_${kind}`
+    this.publicCode = stage === 'session' ? 'session_failed' : stage === 'configuration' ? 'oauth_configuration_failed' : `${stage}_${kind}`
   }
 }
 const transportFailure = (stage, error, signal, status) => {
@@ -40,7 +43,7 @@ const transportFailure = (stage, error, signal, status) => {
 }
 const logAuthDiagnostic = ({ stage, kind, status, code }) => console.warn(`[github-oauth] stage=${stage} kind=${kind}${status === undefined ? '' : ` http=${status}`}${code ? ` code=${code}` : ''}`)
 
-export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, root = process.cwd(), configStore = createConfigStore(root), graphStore, authDiagnostics = logAuthDiagnostic } = {}) {
+export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, root = process.cwd(), configStore = createConfigStore(root), oauthConfigStore = createOAuthConfigStore(root), graphStore, authDiagnostics = logAuthDiagnostic } = {}) {
   const production = env.NODE_ENV === 'production'
   const appUrl = new URL(env.APP_URL || 'http://127.0.0.1:5173')
   if (!['http:', 'https:'].includes(appUrl.protocol) || appUrl.pathname !== '/' || appUrl.search || appUrl.hash || appUrl.username || appUrl.password) {
@@ -49,10 +52,16 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
   if (production && (appUrl.protocol !== 'https:' || (env.SESSION_SECRET?.length ?? 0) < 32)) {
     throw new Error('生产环境需要 HTTPS APP_URL 和至少 32 字符的 SESSION_SECRET。')
   }
+  const environmentCredentials = () => env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+    ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET, kind: env.GITHUB_APP_TYPE === 'github-app' ? 'github-app' : 'oauth' }
+    : null
   const credentials = () => {
-    if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) return { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET, kind: env.GITHUB_APP_TYPE === 'github-app' ? 'github-app' : 'oauth' }
-    const stored = configStore.get()
-    return stored?.origin === appUrl.origin ? stored : null
+    const explicit = environmentCredentials()
+    if (explicit) return explicit
+    const oauth = oauthConfigStore.get()
+    if (oauth?.origin === appUrl.origin) return oauth
+    const appConfig = configStore.get()
+    return appConfig?.origin === appUrl.origin ? appConfig : null
   }
   const callbackUrl = `${appUrl.origin}/api/auth/callback`
   const app = express()
@@ -103,6 +112,8 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
       delete req.session.token
       delete req.session.user
       delete req.session.oauth
+      delete req.session.oauthCandidate
+      delete req.session.authKind
       delete req.session.csrfToken
       delete req.session.starCache
       try { await new Promise((ok, no) => req.session.destroy((error) => error ? no(error) : ok())) }
@@ -137,14 +148,47 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
     res.json({ user: req.session.user ?? null, oauthConfigured: Boolean(credentials()), csrfToken: req.session.csrfToken })
   })
 
-  const localSetup = (req, _res, next) => {
+  const isLocalSetup = (req) => {
     const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
     const localHost = (host) => ['127.0.0.1', 'localhost', '[::1]'].includes(host)
-    if (production || !loopback || !localHost(appUrl.hostname) || !localHost(req.hostname)) {
+    return !production && loopback && localHost(appUrl.hostname) && localHost(req.hostname)
+  }
+  const localSetup = (req, _res, next) => {
+    if (!isLocalSetup(req)) {
       return next(new ApiError(403, '首次应用接入仅支持本机运行；此站点请由管理员连接 GitHub。', 'SETUP_UNAVAILABLE'))
     }
     next()
   }
+  app.get('/api/setup/oauth', localSetup, async (req, res) => {
+    if (req.get('sec-fetch-site') === 'cross-site' || (req.get('origin') && req.get('origin') !== appUrl.origin)) {
+      throw new ApiError(403, '请从本站开始连接 GitHub。', 'SETUP_ORIGIN_INVALID')
+    }
+    const explicit = environmentCredentials()
+    const stored = oauthConfigStore.get()
+    if (!explicit && stored && stored.origin !== appUrl.origin) throw new ApiError(409, '当前网址与已保存的 OAuth 连接不同，请使用原站点网址。', 'SETUP_ORIGIN_CHANGED')
+    req.session.csrfToken ||= random()
+    await save(req)
+    const nonce = random()
+    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`)
+    res.type('html').send(oauthSetupPage({ origin: appUrl.origin, callbackUrl, csrfToken: req.session.csrfToken, nonce, configured: explicit ? explicit.kind === 'oauth' : Boolean(stored), managed: Boolean(explicit) }))
+  })
+  app.post('/api/setup/oauth', localSetup, csrf, async (req, res) => {
+    if (environmentCredentials()) throw new ApiError(409, '本站连接由环境变量管理，请由维护者配置 OAuth。', 'OAUTH_CONFIG_MANAGED')
+    const stored = oauthConfigStore.get()
+    if (stored?.origin !== undefined && stored.origin !== appUrl.origin) throw new ApiError(409, '当前网址与已保存的 OAuth 连接不同，请使用原站点网址。', 'SETUP_ORIGIN_CHANGED')
+    if (stored) throw new ApiError(409, '本站已配置 OAuth 连接，请重新授权。', 'OAUTH_CONFIG_EXISTS')
+    let config
+    try {
+      if (!req.is('application/json') || !req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some((key) => !['clientId', 'clientSecret'].includes(key))) throw new Error('Invalid input')
+      config = validateOAuthConfig({ clientId: req.body.clientId, clientSecret: req.body.clientSecret, kind: 'oauth', origin: appUrl.origin })
+    } catch { throw new ApiError(400, 'Client ID 或 Client secret 格式无效，请核对后重填。', 'INVALID_OAUTH_CONFIG') }
+    // A valid replacement also invalidates the previous authorization attempt.
+    // Neither this JSON response nor the rendered page contains these secrets.
+    delete req.session.oauth
+    req.session.oauthCandidate = { config, createdAt: Date.now() }
+    await save(req)
+    res.json({ next: '/api/auth/github' })
+  })
   let setupBusy = false
   app.get('/api/setup/github', localSetup, async (req, res) => {
     if (req.get('sec-fetch-site') === 'cross-site' || (req.get('origin') && req.get('origin') !== appUrl.origin)) {
@@ -193,9 +237,15 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
   })
 
   app.get('/api/auth/github', async (req, res) => {
-    const config = credentials()
+    const candidate = req.session.oauthCandidate
+    delete req.session.oauthCandidate
+    const candidateValid = candidate && Date.now() - candidate.createdAt >= 0 && Date.now() - candidate.createdAt <= 10 * 60 * 1000 && candidate.config?.origin === appUrl.origin
+    const config = candidateValid ? candidate.config : credentials()
+    if (candidate) await save(req)
     if (!config) return res.redirect('/api/setup/github')
-    req.session.oauth = { state: random(), verifier: random(), createdAt: Date.now() }
+    // Bind every attempt to its original configuration, even if another local
+    // browser finishes setting up OAuth before this callback returns.
+    req.session.oauth = { state: random(), verifier: random(), createdAt: Date.now(), config: { clientId: config.clientId, clientSecret: config.clientSecret, kind: config.kind, ...(config.origin ? { origin: config.origin } : {}) }, candidate: Boolean(candidateValid) }
     const params = new URLSearchParams({
       client_id: config.clientId,
       redirect_uri: callbackUrl,
@@ -211,17 +261,18 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
   app.get('/api/auth/callback', async (req, res) => {
     const attempt = req.session.oauth
     delete req.session.oauth
+    delete req.session.oauthCandidate
     try { await save(req) }
     catch {
       reportAuthFailure(new OAuthFailure('session', 'storage'))
       await discardFailedSession(req, res)
       return res.redirect('/?auth_error=session_failed')
     }
-    const config = credentials()
-    if (!config) return res.redirect('/?auth_error=not_configured')
-    if (!attempt || !same(req.query.state, attempt.state) || Date.now() - attempt.createdAt > 10 * 60 * 1000) {
+    if (!attempt || !same(req.query.state, attempt.state) || Date.now() - attempt.createdAt < 0 || Date.now() - attempt.createdAt > 10 * 60 * 1000) {
       return res.redirect('/?auth_error=invalid_state')
     }
+    const config = attempt.config
+    if (!config) return res.redirect('/?auth_error=not_configured')
     if (req.query.error) return res.redirect('/?auth_error=access_denied')
     if (typeof req.query.code !== 'string' || req.query.code.length > 512) return res.redirect('/?auth_error=missing_code')
     let stage = 'exchange'
@@ -233,24 +284,33 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
       })
       if (data?.error) throw new OAuthFailure(stage, 'rejected', { status })
       if (typeof data?.access_token !== 'string' || !data.access_token) throw new OAuthFailure(stage, 'invalid_response', { status })
+      if (attempt.candidate && (typeof data.scope !== 'string' || !data.scope.split(/[\s,]+/).some((scope) => scope === 'public_repo' || scope === 'repo'))) {
+        throw new OAuthFailure(stage, 'insufficient_scope', { status })
+      }
       // Always revalidate identity before associating any local data with this account.
       stage = 'identity'
       const { data: profile, status: identityStatus } = await oauthJson(stage, 'https://api.github.com/user', {
         headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10', 'User-Agent': 'RepoFlow/0.1', Authorization: `Bearer ${data.access_token}` },
       })
       if (typeof profile?.login !== 'string' || !/^[a-zA-Z0-9-]{1,39}$/.test(profile.login)) throw new OAuthFailure(stage, 'invalid_response', { status: identityStatus })
+      if (attempt.candidate) {
+        stage = 'configuration'
+        if (oauthConfigStore.get() || environmentCredentials()) throw new OAuthFailure(stage, 'storage')
+        await oauthConfigStore.save(config)
+      }
       stage = 'session'
       await regenerate(req)
       req.session.token = data.access_token
+      req.session.authKind = config.kind
       req.session.user = { login: profile.login, name: profile.name, avatar_url: profile.avatar_url, html_url: profile.html_url }
       req.session.csrfToken = random()
       req.session.starCache = {}
       await save(req)
       return res.redirect('/')
     } catch (error) {
-      const failure = error instanceof OAuthFailure ? error : new OAuthFailure(stage, stage === 'session' ? 'storage' : 'invalid_response')
+      const failure = error instanceof OAuthFailure ? error : new OAuthFailure(stage, ['session', 'configuration'].includes(stage) ? 'storage' : 'invalid_response')
       reportAuthFailure(failure)
-      if (stage === 'session') await discardFailedSession(req, res)
+      if (['session', 'configuration'].includes(stage)) await discardFailedSession(req, res)
       return res.redirect(`/?auth_error=${failure.publicCode}`)
     }
   })
@@ -371,7 +431,15 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
   })
   for (const method of ['put', 'delete']) {
     app[method]('/api/starred/:owner/:repo', requireUser, csrf, async (req, res) => {
-      await request(repoPath(req), req.session.token, { method: method.toUpperCase() })
+      repoPath(req)
+      try { await writeStar(request, { owner: req.params.owner, repo: req.params.repo, token: req.session.token, starred: method === 'put' }) }
+      catch (error) {
+        const authKind = req.session.authKind ?? credentials()?.kind
+        if (error.code === 'STAR_PERMISSION_REQUIRED' && authKind === 'github-app' && isLocalSetup(req) && !environmentCredentials()) {
+          throw new ApiError(403, '当前 GitHub App 无法为此项目执行 Star，请启用 OAuth 连接后重试。', 'STAR_OAUTH_REQUIRED')
+        }
+        throw error
+      }
       req.session.starCache ||= {}
       req.session.starCache[`${req.params.owner}/${req.params.repo}`.toLowerCase()] = { value: method === 'put', expires: Date.now() + 60000 }
       recommendations.invalidate(req.session.user.login, req.session.token)
@@ -389,10 +457,12 @@ export function createApp({ env = process.env, fetchImpl = fetch, sessionStore, 
     if (error.code === 'SESSION_EXPIRED' && req.session) {
       delete req.session.token
       delete req.session.user
+      delete req.session.authKind
       delete req.session.starCache
     }
     const status = error instanceof ApiError ? error.status : error.type === 'entity.parse.failed' ? 400 : 500
-    res.status(status).json({ error: status === 500 ? '服务器暂时无法处理请求。' : error.message, code: error.code ?? 'SERVER_ERROR' })
+    const invalidJson = error.type === 'entity.parse.failed'
+    res.status(status).json({ error: status === 500 ? '服务器暂时无法处理请求。' : invalidJson ? '请求内容必须是有效 JSON。' : error.message, code: invalidJson ? 'INVALID_JSON' : error.code ?? 'SERVER_ERROR' })
   })
   return app
 }

@@ -1,6 +1,54 @@
 # RepoFlow 当前验收记录
 
-## 本次：README 链接证据与技术流向
+## 本次：公开 Star 的 OAuth 网页接入
+
+日期：2026-10-11。来源：用户确认网络恢复后可以登录，但真实 Star 仍提示 GitHub 未允许修改。接口与取舍见 [ADR 0013](adr/0013-oauth-connection-for-public-stars.md)，补充 [ADR 0011](adr/0011-star-write-compatibility.md)。执行代理均为用户指定的 GPT-6.1 Sol / xhigh。
+
+- 核对当前 App 的公开元数据：HTTP 200，Starring 为 write、Metadata 为 read；只记录固定权限枚举，不输出 App 身份或客户端凭据。声明正确且同身份兼容仍失败，不能将未声明权限称为唯一根因，也不能宣称所有 GitHub App 都无法执行 Star。
+- 增加仅限本机开发的 `/api/setup/oauth` 向导，提供 GitHub 注册入口、站点 / 回调地址复制、输入校验、深浅主题及权限范围说明。用户本人首次注册 OAuth App，将连接信息填入本机网页，再跳转授权，无需编辑文件。完整显式环境配置优先，网页不能覆盖维护者配置或已保存 OAuth 连接。
+- 候选连接只暂存在服务端会话，十分钟有效，绑定单次 state 与 PKCE。实际 grant 含 public_repo 或此前已获更广 repo，且身份验证成功后，才独占保存新 `.local/github-oauth.json`；本站仅主动请求 `read:user public_repo`，页面明确公开仓库写范围比 Star 更广。原 `.local/github-app.json` 不输出、不修改或迁移。所有授权尝试均绑定当时配置，避免另一浏览器完成接入后错用凭据；失败不写入候选，保存失败清理认证会话。
+- 本机 GitHub App 身份权限失败提供“启用站内 Star”；真正 OAuth 拒绝及环境变量管理 / 远程站点保留原仓库入口，不循环引导设置。两套前端均接入新错误与动作。额外将 JSON 解析失败统一为固定 `INVALID_JSON`，避免解析异常复述提交内容。
+- 最终完整 `npm.cmd test` **352/352 通过**，失败 / 跳过 / 取消均 0，新增 OAuth **45 项**；定向 OAuth / API / setup / Star **155/155**。覆盖独立文件独占写、严格格式、同源限制、scope / 身份拒绝、候选期限与重放、配置快照、并发回调、保存失败清理、环境优先级和 Star 状态提交。定向候选 **154/155**，唯一失败为测试将 JSON null 预期为输入校验，实际先被 Express 严格 JSON 解析拒绝；改为固定 INVALID_JSON 断言，没有放宽产品行为。
+- 两套前端生产构建均 exit 0；默认 `dist/` 为 Gitube，入口 `index-b8BJOhNJ.js`、图谱 `TechnologyGraph-dVBn5FWq.js`。旧 RepoFlow 独立产物位于 `.artifacts/star-oauth-repoflow-build/`，入口 `index-COhvn_dT.js`。
+- 最终 Chrome 专项完整轮 **13/13**，配置冲突优先级补充定向 **1/1**，各自运行时错误 0、浏览器 GitHub 请求计数 0。真实临时 createApp 同源服务覆盖实际表单、授权起始、合成回调、scope / PKCE、会话轮换、独立保存、Star / 取消、错误保态、设置和重新授权；GitHub 上游为封闭 mock。原 App store 写入 0，成功候选 OAuth store 写入 1。390px 深浅主题与桌面错误截图已复核，无页面横向溢出。
+- 浏览器首轮候选 **8/13**，Playwright 重定向拦截缺口使五个合成授权场景加载 GitHub 公开登录页，模拟资源产生 320 条 MIME 错误；没有输入真人凭据、完成真人授权或真实 Star。修正为同源授权入口零重定向读取，并硬阻断浏览器 GitHub 请求后完成最终轮。候选证据保留，不将首轮描述为封闭 mock，也没有因此改产品或放宽业务断言。
+- 核实后只重启本项目 5173 服务，以正常联网权限及进程内现有无凭据本地代理运行 Node `--use-env-proxy`，未改系统代理或凭据。更新后实际服务匿名检索 HTTP 200，返回 **3 个真实仓库**；无效授权码兑换约 **1.24 秒**得到 `exchange_rejected`。实际向导 HTTP 200，nonce CSP、注册链接、权限说明和表单核对通过。负向连接探测不代表真人 OAuth / Star 已成功。
+- 用户随后完成网页接入并于 2026-10-11 明确回复“Star 和取消 Star 都成功”。真实 GitHub 授权后的添加 / 取消 Star 由用户本人操作确认通过，当前账号的 Star 故障闭环；此结论来自用户实际反馈，独立于上述模拟与负向连接测试，不扩展为其他账号或部署环境已验证。
+
+可维护测试为 `tests/oauth-connection.test.mjs`；原始证据保留在被忽略的 `.artifacts/star-app-permissions-results.json`、`star-oauth-tests-final.log`、`star-oauth-live-results.json`、`oauth-star-candidate-results.json`、`oauth-star-final-results.json`、`oauth-star-targeted-results.json` 及对应脚本 / 截图，真实 Star / 取消成功证据为上述用户反馈。预览继续运行于 `http://127.0.0.1:5173`，重启会使旧内存登录会话失效。本轮未额外提交或远程推送，既有推荐与恢复功能的工作区改动保留。
+
+## 历史：Star 写入兼容、推送与图谱恢复
+
+日期：2026-10-11。来源：用户反馈多个仓库全部 Star 失败，并要求返回首页、切换模式和技术图谱时保留进度。接口与取舍见 [ADR 0011](adr/0011-star-write-compatibility.md)、[ADR 0012](adr/0012-resumable-feed-and-graph-workspaces.md)。执行代理均为 GPT-6.1 Sol / xhigh。
+
+- Star 保留 REST 首选，PUT 显式空正文；仅已分类的非限流 403 使用同一账号、固定 GraphQL 查询与必要的 `addStar` / `removeStar` 进行一次有界兼容。核对公开仓库、全名、Node ID 和实际状态后才提交缓存；401、限流、网络或未知写入结果不会触发重复写入。真正权限失败维持界面原状态，并提供“在 GitHub 打开”按钮。没有采集真人 Token 或原始 403，不能把某一种权限限制称为已确认的唯一根因。
+- 首页按账号、频道与推荐模式分别保存当前列表、分页与滚动。返回缓存列表不重搜，恢复时原生底部哨兵也不抢先分页；再次滚动才继续无限加载。换一批只刷新当前模式，偏好 / 关注者滑杆变化用于后续分页或换批；屏蔽与已 Star 过滤即时生效，整批筛除时显示明确空态。重置和账号切换使旧在途结果及历史快照失效。缓存寿命为本次 SPA 运行，完整刷新视为再次启动。
+- 图谱按账号与规范根名保留最多 8 根，分别保存内嵌与独立视图，并保护当前账号最近的独立工作台。保留合并图、多层追溯、选中、摄像机、面板、折叠、输入与终态摘要；返回根或 `/graph` 不 POST / 轮询。表单显式提交任何根均强制新分析，普通导航恢复缓存；成功才替换旧图。离页中断后提供手动继续，旧响应不能提交；缓存不含 CSRF / Token 或可轮询任务 ID。StrictMode 首次分析延后一拍，避免 effect 重放重复提交。
+- 最终 `npm.cmd test` **307/307 通过**，失败 / 跳过 / 取消均 0。新增 Star **53 项**、feed 恢复 **14 项**、图谱工作区 **15 项**；图谱定向连同既有布局与关系 UI **29/29**。两个前端生产构建均 exit 0；默认 `dist/` 为 Gitube，入口 `index-CC9memgl.js`、图谱 `TechnologyGraph-DFeX8IyU.js`；旧 RepoFlow 独立产物位于 `.artifacts/star-fix-repoflow-build/`。
+- 最终 Chrome 既有整站 **22/22** 通过。专项完整轮 **19/21**，最后两项定向 **2/2**，合计覆盖全部 21 项，未声称一次完整 21/21。Star 8 项经浏览器真实同源 PUT / DELETE 和临时 `createApp` 后端验证，GitHub 上游为封闭 mock；feed / graph 使用隔离 API fixture。覆盖权限按钮、取消失败、三连、401 / CSRF，三模式顺序与 420px 滚动、原生 sentinel、换批隔离、滑杆、慢响应、重置 / 账号隔离，以及图谱展开 / 视角、最近独立根、显式搜索、失败保图与手动继续。运行时错误 0，桌面浅色与 390px 深色截图已复核，无页面横向溢出。
+- 初始专项候选 **11/20**；问题为 fixture 固定 CSRF 与实际会话动态 CSRF 不符，以及通过可变页面 URL 错把在途详情相关搜索计为首页搜索。完整轮余下两项为同一请求归因问题和固定等待不足；最终使用请求固定 Referer 与 4 秒上限等待相同 420px 目标，未放宽返回不搜索、顺序或滚动数值断言。候选证据保留，未因此改动产品。
+- 本轮后端只改 Star 路径，授权码兑换与登录实现未变。第一次正常联网重启后，实际 OAuth 探测及用户登录均出现连接超时；安全诊断为 `exchange / timeout / UND_ERR_CONNECT_TIMEOUT`。Node 直连 `github.com` 同样超时，系统 HTTP 经本机已启用代理可连；随后仅为预览进程设置现有无凭据本地系统代理与 `NO_PROXY`，以 Node `--use-env-proxy` 启动。没有更改系统代理、文件配置或 App 凭据。最终通过实际服务匿名检索返回 **3 个真实仓库**；无效授权码探测约 **1.15 秒**收到 `exchange_rejected`，证明兑换请求已到达 GitHub，不等同真人授权成功。
+
+证据保留于被忽略的 `.artifacts/star-fix-tests-final.log`、`star-fix-integration-browser-results.json`、`star-fix-live-results.json`、`star-resume-summary.json`、`star-resume-candidate-results.json`、`star-resume-final-results.json`、`star-resume-targeted-results.json` 及对应脚本 / 截图；可维护测试纳入 `tests/`。预览继续运行于 `http://127.0.0.1:5173`，网络上下文切换使旧登录会话失效。真人登录和真实 Star 仍待用户本人确认；没有读取 / 改写本机 App 凭据、代用户真实 Star、额外提交或远程推送。此前推荐功能的工作区改动保留。
+
+## 历史：关注者权重、有效阅读与探索模式
+
+日期：2026-10-11。来源：用户要求提交当前进度、调整特定 following 权重、利用有效阅读小幅学习，以及提供换口味 / 完全随机开关；随后明确各半只是当前目标，保留后续实验空间。规格见 [当前规格](specification.md)，理由与参数边界见 [ADR 0010](adr/0010-recommendation-controls-and-reading-signals.md)。执行代理均为 GPT-6.1 Sol / xhigh。
+
+- 已先创建本地检查点 `4ee6dd3`（`Integrate Gitube authentication and technical provenance graphs`），保存此前认证、详情与技术图谱进度；使用中性 GitHub noreply 提交身份，没有修改持久 Git 配置或推送。下面的推荐功能作为检查点后的工作区改动保留。
+- 首页与设置提供正常推荐、换换口味、完全随机三个互斥模式及换批入口。换口味默认目标比例 `0.5`，可通过集中策略参数 / 引擎选项实验调整；实际按仓库 topics 分类，一侧不足由另一侧补足。无可用手选兴趣时禁用，删除或屏蔽最后一个兴趣后立即回到正常模式。
+- 两种探索模式在实际检索候选中洗牌，不采用兴趣评分或正常模式的固定社交插槽；保留已 Star、本人项目、归档、不感兴趣、屏蔽和曝光过滤。每批最多 3 轮 × 8 个搜索、每个最多 12 项，使用创建年份、Star 区间和排序变种有界召回；不宣称全 GitHub 等概率。三模式游标 / 会话曝光独立，浏览反馈共享；旧在途批次不能提交列表、游标或曝光。
+- 偏好设置列出实际采样到动态的关注者，提供 0–3 倍、步长 0.25 的滑杆，默认 1 倍。每人 topic 总预算最多 `1.2 × 权重`，按采样项目归一并采用 30 天半衰期；0 倍排除该人的画像与社交排序影响。原始关注频道仍保留动态，采样继续限前 12 位关注用户 × 每人最近 6 个公开 Star，明确不代表全体兴趣。
+- 仓库详情仅累计可见且获得焦点的前台时间；严格超过 3 分钟，或严格超过 1 分钟并打开本项目原仓库，增加初始权重 `0.3` 的阅读信号。隐藏 / 失焦 / 离页暂停，路由与账号切换隔离；原仓库左键、键盘和中键行为保留，作者链接不触发。单账号同仓库 24 小时最多一次，最多 1000 条活跃去重记录，满额暂停新信号。探索模式仍记录打开、稍后再看、收藏与阅读，回正常模式时参与推荐。
+- 保持存储 version 1 兼容，非法新增字段独立过滤，访客与不同 GitHub 账号隔离。重置推荐清理模式、关注者权重、阅读去重与反馈 / 游标，同时保留收藏、稍后再看和历史。
+- 最终 `npm test` **225/225 通过**，失败 / 跳过 / 取消均为 0；新增推荐引擎 / 存储定向 **19/19**、阅读定向 **11/11**。默认 `npm run build` exit 0，Gitube TypeScript 通过；入口 `index-uhj3UiNH.js`，图谱 `TechnologyGraph-CYJuOAIq.js`。原 RepoFlow 源码未变，本轮没有重复构建旧前端。
+- 最终 Chrome 既有整站 **22/22**、推荐专项 **24/24** 通过，运行时与控制台错误均为 0；另有手机滑杆补拍定向 **1/1**。覆盖实际切换 / 换批 / 刷新 / 返回、慢响应隔离、兴趣回退、过滤、权重持久化 / 隔离 / 重置、严格时间边界、原仓库外跳、后台暂停、仓库 / 账号隔离及 24 小时去重。实测换口味 9/9、短缺补足 6/12，关注者画像贡献 24%→72%，打开后新增阅读贡献 12%→约 18%。桌面浅色设置、390px 深色首页与关注者滑杆截图已人工复核，无页面横向溢出。
+- 专项候选为 19/22：两处脚本错误等待访客不会发起的账号种子请求，一处无头 Chrome 标签切换未实际改变 `hasFocus`。修正验收等待条件，并用受控焦点 / 可见性状态与实际生命周期事件验证暂停；未因此修改产品或削弱业务断言。原候选结果保留。浏览器时钟采用 Playwright fake time，本轮没有声称真实操作系统焦点或跨浏览器验收。
+- 定稿同源后端实际匿名执行两个探索搜索形状，均 HTTP 200，各返回 3 个真实仓库，总数分别 2320 / 19507；核对年份、Star 档位、topic 包含 / 排除及非归档条件。浏览器隔离 fixture 只用于验收，产品仍访问实际 GitHub。
+
+原始证据保留在被忽略的 `.artifacts/recommendation-tests-final.log`、`recommendation-integration-browser-results.json`、`recommendation-controls-results.json`、`recommendation-controls-candidate-results.json`、`recommendation-controls-targeted-results.json`、`recommendation-public-search.json` 及对应脚本 / 截图；可维护的定向测试纳入 `tests/`。本轮为前端改动，没有重启现有正常联网的 5173 后端，预览仍为 `http://127.0.0.1:5173`；没有读取或改写本机 App 凭据、代用户完成真人 OAuth / 真实 Star 写入或发布远程。热门项目熟悉度降权继续保留为 [后续调研](recommendation-research.md)，默认比例与阅读权重尚未经推荐效果实验确定最优值。
+
+## 历史：README 链接证据与技术流向
 
 日期：2026-10-11。来源：用户要求覆盖 Related 与版权声明中的仓库链接，并根据明确的上下游依据调整图谱箭头。规格见 [图谱合同](graph-contract.md)，设计与边界见 [ADR 0009](adr/0009-readme-evidence-and-technical-flow.md)。执行代理均为 GPT-6.1 Sol / xhigh。
 

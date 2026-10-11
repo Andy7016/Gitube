@@ -1,5 +1,7 @@
 # Gitube 集成接口
 
+2026-10-11 补充：Star 的固定同身份 GraphQL 兼容路径见 [ADR 0011](adr/0011-star-write-compatibility.md)，API 路径与 CSRF 合同保持；运行内推送与图谱工作区恢复见 [ADR 0012](adr/0012-resumable-feed-and-graph-workspaces.md)。模式切换恢复已有批次，主动换批才替换，页面刷新视为新启动。
+
 来源：用户 2026-10-10 授权合并 Andy7016/Gitube 的前端与现有认证、追溯；2026-10-11 要求改用重建后的仓库。上游 main 固定版本 `418daee527607dd0a97b1c8d675bf0a7a4895ecf`，MIT；来源更新见 [ADR 0007](adr/0007-rebuilt-upstream-history.md)。前端位于 `gitube/`，原 `src/` 保留可构建，后端共用 `server/`。本文件规定此次前后端交界。
 
 ## 会话与操作
@@ -32,3 +34,5 @@ Star 复用 `PUT/DELETE /api/starred/:owner/:repo`；Gitube `setStarred(repoId)`
 BrowserRouter 保留 Gitube `/repo/:owner/:name`、收藏、历史、搜索、设置和引导；兼容旧 `/project/:owner/:repo`，增加 `/graph`、`/graph/:owner/:repo`。复用 `src/TechnologyGraph.tsx`，桥接 account、csrfToken、导航和会话失效回调。图谱 CSS 适配 Gitube 深浅主题；嵌入框体独立滚动，README 完整展示。
 
 保留上游已有的频道、反馈、多收藏夹、主题、快捷键与浏览器返回体验。登录页去除装饰 fixture，不要求 PAT 或修改本地配置。推荐热门度的新机制仅记入 [调研记录](recommendation-research.md)，本次不先行实验。
+
+2026-10-11 补充推荐控制见 [ADR 0010](adr/0010-recommendation-controls-and-reading-signals.md)：前端复用既有 `followingStars` 与 `searchMany`，不增加 API 操作、授权范围或账号数据上限；`LibraryData.version:1` 兼容新增模式、关注者权重和阅读去重字段。阅读与模式行为仅在当前账号的浏览器本地记录。正常模式可受关注者与阅读权重影响，两个探索模式仍记录偏好但不采用兴趣排序；这不替代尚待调研的热门项目熟悉度降权。

@@ -9,11 +9,12 @@ const compile = source => ts.transpileModule(source, { compilerOptions: { target
 const dataUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 const sharedUrl = new URL('../shared/graph-relations.mjs', import.meta.url).href
 const graphDataUrl = dataUrl(compile(await readFile(new URL('../src/graph-data.ts', import.meta.url), 'utf8')).replaceAll('../shared/graph-relations.mjs', sharedUrl))
+const graphCacheUrl = dataUrl(compile(await readFile(new URL('../src/graph-workspace-cache.ts', import.meta.url), 'utf8')).replaceAll('./graph-data', graphDataUrl))
 const repoDataUrl = dataUrl(compile(await readFile(new URL('../src/data.ts', import.meta.url), 'utf8')))
 let componentSource = compile(await readFile(new URL('../src/TechnologyGraph.tsx', import.meta.url), 'utf8'))
 componentSource = componentSource.replace(/import ['"]\.\/graph\.css['"];?/, '')
 for (const [specifier, resolved] of [
-  ['./graph-data', graphDataUrl], ['./data', repoDataUrl], ['../shared/graph-relations.mjs', sharedUrl],
+  ['./graph-data', graphDataUrl], ['./graph-workspace-cache', graphCacheUrl], ['./data', repoDataUrl], ['../shared/graph-relations.mjs', sharedUrl],
   ['react', import.meta.resolve('react')], ['react/jsx-runtime', import.meta.resolve('react/jsx-runtime')], ['lucide-react', import.meta.resolve('lucide-react')],
 ]) componentSource = componentSource.replaceAll(`'${specifier}'`, JSON.stringify(resolved)).replaceAll(`"${specifier}"`, JSON.stringify(resolved))
 const { GraphRelationLine, GraphRelationDetails, EvidenceList, fitCamera, graphDensity, placeGraphLabels } = await import(dataUrl(componentSource))
