@@ -1,154 +1,70 @@
-<p align="center">
-  <img src="docs/banner.png" alt="Gitube：像刷视频一样刷 GitHub" width="100%">
-</p>
+# Gitube / RepoFlow
 
-<p align="center">
-  <a href="https://andy7016.github.io/Gitube/"><b>打开网页版</b></a>
-  &nbsp;|&nbsp;
-  <a href="https://github.com/Andy7016/Gitube/releases/latest"><b>下载桌面版</b></a>
-  &nbsp;|&nbsp;
-  <a href="README.en.md">English</a>
-</p>
+按 YouTube 的布局浏览 GitHub 开源项目：顶部搜索、分类标签、连续加载、多收藏夹、稍后再看、历史记录和真实 Star。默认前端采用 [Andy7016/Gitube](https://github.com/Andy7016/Gitube) 的界面与交互，接入本项目的浏览器 GitHub 认证、完整 README 和技术来源图谱。React + TypeScript + Vite，配套 Express 同源 API。
 
-<p align="center">
-  <a href="https://github.com/Andy7016/Gitube/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/Andy7016/Gitube?color=F5A800&label=%E7%89%88%E6%9C%AC"></a>
-  <a href="LICENSE"><img alt="MIT 协议" src="https://img.shields.io/github/license/Andy7016/Gitube?label=%E5%8D%8F%E8%AE%AE"></a>
-  <img alt="支持的平台" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-%E7%BD%91%E9%A1%B5%20%7C%20macOS%20%7C%20Windows%20%7C%20Linux-161B26">
-</p>
+当前基于 2026-10-11 拉取的 Gitube 重建版 `418daee`，根 Git 仓库与本地分支 `integration/auth-graph` 只继承新上游历史。版本、版权与 MIT 许可证见 [gitube/UPSTREAM.md](gitube/UPSTREAM.md) 和 [LICENSE](LICENSE)。原前端 `src/` 保留，可通过 `npm run build:repoflow` 单独构建；默认 `npm run build` 构建 `gitube/`。集成理由见 [ADR 0006](docs/adr/0006-gitube-frontend-integration.md) 与 [重建版合并记录](docs/adr/0007-rebuilt-upstream-history.md)。[English](README.en.md)。
 
-**Gitube** 让你像刷 B 站 / YouTube 一样刷 GitHub 开源项目：用 GitHub 账号登录后，首页按你的兴趣一屏一屏推项目，看到喜欢的可以一键 Star、收藏、稍后再看。
+## 本地运行
 
-完全开源，没有自己的服务器：你的 Token 只保存在你的设备上，所有请求都直接发给 GitHub。
+需要 Node.js 22.12 或更新版本。
 
-<p align="center">
-  <img src="docs/screenshot.png" alt="Gitube 界面截图" width="100%">
-</p>
-
-## 功能
-
-- **推荐信息流**：根据你最近 Star 的项目、自己写的仓库、选的兴趣方向，以及你在这里的操作（Star / 收藏 / 打开 / 不感兴趣）推荐项目，每张卡片标出推荐理由（「因为你 Star 了 xxx」「@某人 Star 了」「本周新星」……）。无限滚动，「换一批」刷新。
-- **频道**：推荐、关注（你关注的人最近 Star 了什么）、本周新星、本月热门，以及你选的兴趣方向（生物信息、大模型、Rust……）。
-- **快捷操作**
-  - 卡片右下角的星星：一键 Star / 取消 Star（真的 Star 到你的 GitHub 账号上）
-  - 鼠标移到封面上：右上角「稍后再看」「收藏」
-  - 「⋮」菜单：收藏到指定收藏夹、复制 `git clone` 命令、不感兴趣、不想看某个话题 / 语言
-  - 详情页**长按 Star 一键三连**：Star + 收藏 + 关注作者
-  - 详情页快捷键：`S` Star，`B` 收藏到…，`L` 稍后再看
-- **详情页**：像视频播放页，左边是项目信息和 README，右边是相关推荐。
-- **收藏夹**（可以建多个）、**稍后再看**、**历史记录**、**我的 Star**、**搜索**（支持 GitHub 搜索语法，比如 `topic:bioinformatics stars:>500`）。
-- **封面**：项目设置了社交预览图就用那张图；没有的话自动生成一张——底色是主语言的颜色，右上角的格子越亮越密，说明项目最近越活跃。
-- 浅色 / 深色主题，手机浏览器也能用。
-
-## 第一次使用：用 Token 登录
-
-1. 点登录页上的链接，打开 GitHub 生成 Token 的页面（需要的权限已经勾好：`public_repo`、`read:user`、`user:follow`）
-2. Expiration 选一个有效期，拉到底点 **Generate token**
-3. 复制 `ghp_` 开头的 Token，粘贴到登录页
-
-Token 只保存在你自己的设备上，只用来直接请求 GitHub API。也可以用 fine-grained token：Account permissions 里把 **Starring** 设为 Read and write，**Followers** 设为 Read and write（一键三连关注作者用，可不开）。
-
-## 安装桌面版
-
-到 [Releases](https://github.com/Andy7016/Gitube/releases) 下载：
-
-| 系统 | 文件 |
-| --- | --- |
-| Mac（Apple 芯片 M1/M2/M3/M4…） | `Gitube_x.x.x_aarch64.dmg` |
-| Mac（Intel 芯片） | `Gitube_x.x.x_x64.dmg` |
-| Windows | `Gitube_x.x.x_x64-setup.exe` |
-| Linux | `.AppImage` 或 `.deb` |
-
-软件没有经过苹果 / 微软的付费签名，第一次打开会被系统拦一下：
-
-- **Mac**：提示“无法验证开发者”或“已损坏”时，打开「系统设置 → 隐私与安全性」，在下方点「仍要打开」；或者在终端运行 `xattr -cr /Applications/Gitube.app` 后再打开。
-- **Windows**：出现“Windows 已保护你的电脑”时，点「更多信息 → 仍要运行」。
-
-## 本地开发
-
-需要 Node.js 18 或更高版本。
-
-```bash
+```powershell
 npm install
-npm run dev          # 网页版，打开 http://localhost:5173
+npm run dev
 ```
 
-桌面版开发还需要安装 [Rust](https://www.rust-lang.org/tools/install)（Mac 上还要有 Xcode 命令行工具：`xcode-select --install`）：
+打开 [本地页面](http://127.0.0.1:5173)。列表、统计、头像和 README 获取自 GitHub，没有演示数据。封面使用真实自定义社交预览图，或按仓库名称、语言、更新时间生成装饰图形；后者不是真实贡献热力图。未登录也可浏览公开项目；GitHub 限额或网络失败时页面显示实际错误，可点击重试。
 
-```bash
-npm run desktop:dev     # 打开桌面窗口，改代码会自动刷新
-npm run desktop:build   # 在本机打包安装包，输出在 src-tauri/target/release/bundle/
+GitHub 登录和数据请求由本机 Node 服务发出，运行它的进程需能访问 `github.com` 与 `api.github.com`。浏览器能打开页面还不能证明服务端可以联网；授权失败时界面会区分换凭证、读取账号和保存会话的失败阶段。
+
+## GitHub 登录
+
+直接点击页面右上角「GitHub 登录」。首次本机连接会跳转 GitHub，按其页面确认创建本站 GitHub App，然后继续授权登录。服务端自动保存连接信息，不需要创建或修改 `.env`；之后点击登录直接进入 GitHub 授权。
+
+这里使用 [GitHub 官方 App manifest 注册流程](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)。首次注册是 GitHub 对应用身份的要求，由你在 GitHub 页面确认。应用只申请 Metadata 读与 Starring 写权限。凭据存放于被忽略的 `.local/github-app.json`，不发送给前端。访问令牌仅保存在服务端会话，浏览器使用 HttpOnly Cookie；授权使用 state / PKCE，写入校验 CSRF。
+
+应用不使用 webhook，注册配置完全省略 webhook 地址。若之前看到 GitHub 的 `Hook url … 127.0.0.1` 错误，回到本站重新点击登录，勿继续提交旧错误页面的配置。
+
+请保持使用 `http://127.0.0.1:5173`；应用回调地址绑定这个站点。如果已有 OAuth App 或正式部署，可由维护者使用 `.env.example` 提供现有应用凭据。此选项不是本地首次登录的前置步骤。
+
+## 使用
+
+- 搜索框按 Enter 或点击搜索按钮；支持普通关键词、`topic:react`、`language:rust`。
+- 分类标签筛选兴趣，本周新星筛选近七天创建的仓库，本月热门筛选近三十天有代码更新的仓库。
+- 点击封面或名称进入独立详情页，页面下方可阅读完整 README；可直接访问、刷新、分享地址，或使用浏览器前进后退回到项目流。
+- 详情操作区提供稍后再看、收藏、Star、复制链接和打开原仓库；卡片右侧星标也可直接 Star / 取消 Star，未登录时提示跳转登录。
+- 卡片三点菜单提供稍后再看、收藏、不感兴趣及 GitHub 原仓库入口。
+- 底部自动加载下一页，也可点击手动加载；侧栏可折叠，手机使用抽屉导航。
+- 登录后自动分析最近最多 1,000 个 Star 与最近更新的最多 300 个本人公开仓库，根据实际主题、主要语言与 Star 时间推荐项目；页面显示分析数量、采样范围与来自具体仓库的推荐依据。
+- 默认推荐排除已 Star 和本人仓库。手选主题与语言仍可参与排序，自动分析不覆盖手选设置；主动搜索及明确分类保留指定范围。
+- 账号画像缓存十五分钟，可点击「刷新兴趣」更新；一个来源失败时显示部分分析说明，全部失败仍可按已有偏好浏览。
+- 打开项目后，技术来源图谱在独立框体自动处理一级，并显示圆形阶段进度。README 的 credits / citations、显式 GitHub 依赖和开发者关联项目均保留出处；直接引用在内档，人员关联在外档，各档按标签重合度、Star 确定远近。
+- 可选中任一节点查看证据并手动继续追溯；侧栏「技术图谱」进入独立工作台，也可直接访问 `/graph/owner/repo`。采集有请求与时间上限，部分结果会说明原因；公开图谱缓存至本机，完整结果 24 小时、部分结果 5 分钟。
+- 节点面积表示真实 topic 重合度，至少 30% 标注名称；选择节点突出相连关系并居中，使用「查看全图」恢复概览。手动展开的分支分开放置，来源面板显示父路径与层级；语言回退不作为 topic 重合度。[呈现设计](docs/adr/0008-graph-branches-and-camera.md)。
+- README 的 Related 与版权 / 许可证归属链接也参与发现；明确关系按“技术提供方 → 使用方”绘制箭头，普通提及、关联或冲突保持无向虚线。选中节点可核对原文、行地址和判定依据；仅有版权链接不代表依赖或许可证兼容。[技术流向设计](docs/adr/0009-readme-evidence-and-technical-flow.md)。
+- 图谱工作区最多显示 120 个节点，手动最多延展 5 层；单任务最多 24 个直接来源、4 位相关人员各 100 个公开仓库，预算 40 次请求 / 90 秒。
+
+热门程度不等于新的发现价值。关于已知高 Star 项目重复靠前的问题已列入 [推荐调研记录](docs/recommendation-research.md)；本次集成保留现有推荐逻辑，后续再评估熟悉度、长尾探索和重复曝光衰减。
+
+收藏、稍后再看、历史、隐藏与偏好保存在当前浏览器，按访客及每个 GitHub 账号隔离，不跨设备同步。清除站点数据会移除这些本地记录。
+
+## 构建与验证
+
+```powershell
+npm run check
+npm start
 ```
 
-不装 Rust 也没关系，桌面版可以全部交给 GitHub 自动打包（见下一节）。
+先停止开发服务，再运行 `npm start`；它在同一个 `http://127.0.0.1:5173` 提供 `dist/` 与 API，已注册的回调地址可以继续使用。开发模式 Vite 将 `/api` 代理到 `127.0.0.1:5314`；本机 Windows 会拒绝绑定旧默认 3001，已使用可用端口。已有环境变量设置会优先于默认值；自行更改开发 API 的 `PORT` 时，也需同步 Vite proxy。
 
-## 发布
+`npm test` 使用模拟 GitHub 与临时凭据，不操作真实账号。验收记录见 [docs/acceptance.md](docs/acceptance.md)。
 
-两个自动流程在 `.github/workflows/` 里：
+## 正式部署
 
-- **网页版**（`pages.yml`）：每次推送到 `main` 分支，自动打包并发布到 GitHub Pages。
-  第一次使用前，到仓库 **Settings → Pages → Build and deployment → Source** 选 **GitHub Actions**。
-- **桌面版**（`release.yml`）：到仓库 **Actions → 发布桌面软件 → Run workflow**，大约 15 分钟后，Releases 页面会出现各系统的安装包。
-  发新版本前，先把 `src-tauri/tauri.conf.json` 里的 `"version"` 改大（比如 `0.1.0` → `0.2.0`），否则会传到同一个版本里。
+自动注册入口仅供本机开发使用。维护者为正式 HTTPS 网址注册 GitHub App，设置 `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_TYPE=github-app`、`APP_URL`、`NODE_ENV=production` 和至少 32 字符的随机 `SESSION_SECRET`；用户直接跳转 GitHub 授权。已有 OAuth App 也支持，省略 `GITHUB_APP_TYPE` 即使用 OAuth scopes。反向代理按实际拓扑设置 `TRUST_PROXY=1`。
 
-## 用 GitHub OAuth 登录（可选，仅本地开发）
+服务仅监听 `127.0.0.1`，部署可通过 `PORT=3001` 指定代理目标端口。默认内存会话适合本地单实例，重启需要重新登录；多实例可通过 `createApp({sessionStore})` 接共享存储。当前未实现 OAuth refresh token 自动轮换，到期重新登录。
 
-想在本地开发时用「使用 GitHub 账号登录」按钮：
+上游桌面封装源码保留在 `src-tauri/`，本轮尚未接入桌面安装包。当前版本需要 Node 同源 API，未启用上游静态 GitHub Pages / 桌面自动发布工作流。
 
-1. 打开 https://github.com/settings/applications/new
-   - Homepage URL：`http://localhost:5173`
-   - Authorization callback URL：`http://localhost:5173/`
-2. 创建后复制 Client ID，再点 Generate a new client secret
-3. 把 `.env.example` 复制成 `.env`，填上 `VITE_GITHUB_CLIENT_ID` 和 `GITHUB_CLIENT_SECRET`
-4. 重新 `npm run dev`
-
-用授权码换 token 必须带 client secret，这一步由 `vite.config.ts` 里挂在开发服务器上的小接口完成，secret 不会打包进前端。网页版和桌面版没有服务器，所以只提供 Token 登录。
-
-## 推荐是怎么算的
-
-全部在本地完成，代码在 `src/lib/recommend.ts`：
-
-1. **画像**：统计每个 topic / 语言的权重。来源：最近 100 个 Star（越新权重越高）、自己的仓库、兴趣方向（权重最高）、在本应用里的行为（Star +2.5，收藏 +2，稍后再看 +1，打开 +0.6，不感兴趣 −3，30 天半衰期）。
-2. **召回**：按权重抽几个 topic（每个 topic 有「经典高星 / 最近活跃 / 一年内新项目」三种搜法），加上「和你 Star 过的某个项目相似」「常用语言的新项目」「本周新星」「换换口味」，合成**一次** GraphQL 请求里的多个搜索。
-3. **过滤**：去掉已 Star、不感兴趣、屏蔽的话题 / 语言、3 天内推荐过的。
-4. **排序**：兴趣匹配度 50% + 热度 25% + 活跃度 15% + 一点随机，再打散（同作者、同语言、同来源不扎堆）。
-5. 穿插「你关注的人 Star 了」的社交推荐。
-
-偏好设置页的「Gitube 眼中的你」会显示当前画像。
-
-## 数据存在哪里
-
-- **Star / 取消 Star / 关注作者**：直接写到你的 GitHub 账号。
-- **收藏夹、稍后再看、历史记录、推荐反馈**：GitHub 没有对应的公开 API，所以存在本地（浏览器或桌面版的本地存储），按 GitHub 用户名分开。网页版和桌面版各存各的，换浏览器或清除网站数据会丢失。
-- **Token**：只存在本地，退出登录会删除。
-
-## 项目结构
-
-```
-src/
-  api/github.ts        GitHub GraphQL / REST 请求（搜索、Star、README……）
-  lib/recommend.ts     推荐引擎
-  lib/channels.ts      首页频道
-  lib/interests.ts     兴趣标签 ↔ GitHub topic
-  lib/cover.ts         自动生成封面
-  lib/actions.ts       收藏、稍后再看、不感兴趣、一键三连
-  store/               状态（zustand）：登录、本地数据、Star 状态、信息流
-  components/          卡片、封面、Star 按钮、菜单、收藏夹弹窗……
-  pages/               登录、选兴趣、首页、详情、收藏夹、稍后再看、历史、我的 Star、搜索、设置
-  styles/              全局样式、README 排版
-src-tauri/             桌面版（Tauri）：窗口配置、图标、Rust 入口
-.github/workflows/     自动发布网页版和桌面版
-app-icon.png           图标原图；改了以后运行 npx tauri icon 重新生成各尺寸
-vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
-```
-
-## 常见问题
-
-- **一直加载 / 提示连不上 GitHub**：需要能访问 `api.github.com`。国内网络不稳定时可以开代理再试。
-- **提示接口次数用完**：GitHub GraphQL 每小时 5000 点，正常刷不会用完；设置页能看到剩余额度。
-- **Star 失败，提示权限不够**：Token 没勾 `public_repo`。重新生成一个再登录。
-- **头像、封面图显示不出来**：图片来自 `avatars.githubusercontent.com` 等域名，加载失败时会自动换成首字母头像和自动生成的封面。
-- **桌面版发布失败，提示 Resource not accessible by integration**：到仓库 Settings → Actions → General → Workflow permissions，选 Read and write permissions。
-
-## 开源协议
-
-[MIT](LICENSE)
+[当前规格](docs/specification.md) · [接口](docs/api.md) · [账号推荐 ADR 0003](docs/adr/0003-account-signals-and-webhook-free-setup.md) · [详情与 README ADR 0004](docs/adr/0004-project-pages-and-full-readme.md) · [图谱规格](docs/graph-contract.md) · [图谱 ADR 0005](docs/adr/0005-technical-provenance-graph.md)

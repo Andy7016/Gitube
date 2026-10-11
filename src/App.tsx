@@ -1,72 +1,202 @@
-import { useEffect } from 'react'
-import { HashRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
-import { Layout } from './components/Layout'
-import { Toasts } from './components/Toasts'
-import { useAuth } from './store/auth'
-import { useLibrary } from './store/library'
-import { HomePage } from './pages/HomePage'
-import { LoginPage } from './pages/LoginPage'
-import { OAuthCallback } from './pages/OAuthCallback'
-import { OnboardingPage } from './pages/OnboardingPage'
-import { RepoPage } from './pages/RepoPage'
-import { HistoryPage, LaterPage, SavedPage, StarsPage } from './pages/LibraryPages'
-import { SearchPage } from './pages/SearchPage'
-import { SettingsPage } from './pages/SettingsPage'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { ArrowUpRight, Bookmark, Check, Clock3, ExternalLink, EyeOff, Github, History, Home, LoaderCircle, LogOut, Menu, MoreVertical, Network, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Star, Trash2, Undo2, X } from 'lucide-react';
+import ProjectCover from './ProjectCover';
+const ProjectDetail = lazy(() => import('./ProjectDetail'));
+const TechnologyGraph = lazy(() => import('./TechnologyGraph'));
+import { defaultPreferences, formatNumber, formatRelativeTime, interests, languageColors, languages, matchingInterests, profileReason, projectPath, recommendationScore, recommendationTopics, safeUrl, type Preferences, type RecommendationProfile, type Repo } from './data';
 
-/** 没登录跳登录页；第一次登录先选兴趣 */
-function RequireAuth({ onboarding = false }: { onboarding?: boolean }) {
-  const token = useAuth((s) => s.token)
-  const viewer = useAuth((s) => s.viewer)
-  const libLogin = useLibrary((s) => s.login)
-  const onboarded = useLibrary((s) => s.onboarded)
+type View = 'home' | 'watchLater' | 'bookmarks' | 'starred' | 'history';
+type Session = { user: { login: string; name: string | null; avatar_url: string; html_url: string } | null; oauthConfigured: boolean; csrfToken: string | null };
+type Library = { bookmarks: Record<string, Repo[]>; watchLater: Record<string, Repo[]>; history: Record<string, Repo[]>; hidden: Record<string, number[]> };
+type ApiError = Error & { status?: number; code?: string };
+type DetailRoute = { owner: string; name: string; key: string };
+type DetailScrollRestore = { key: string; scope: string; y: number; frame: number; overflowAnchor: string };
+type ListSnapshot = { scope: string; view: View; query: string; search: string; category: string; language: string; sort: string; visibleCount: number; feedQuery: string; feed: Repo[]; page: number; hasMore: boolean };
+function readDetailRoute(path = location.pathname): DetailRoute | null { const match = path.match(/^\/project\/([^/]+)\/([^/]+)\/?$/); if (!match) return null; try { const owner = decodeURIComponent(match[1]), name = decodeURIComponent(match[2]); return /^[\w.-]+$/.test(owner) && /^[\w.-]+$/.test(name) ? { owner, name, key: `${owner}/${name}` } : null; } catch { return null; } }
+function readGraphRoute(path = location.pathname): DetailRoute | null { if (/^\/graph\/?$/.test(path)) return { owner: '', name: '', key: '' }; const route = readDetailRoute(path.replace(/^\/graph\//, '/project/')); return path.startsWith('/graph/') ? route : null; }
+const LIBRARY_KEY = 'repoflow.library.v2', PREFS_KEY = 'repoflow.preferences.v1';
+const navItems = [{ id: 'home', label: '首页', icon: Home }, { id: 'watchLater', label: '稍后再看', icon: Clock3 }, { id: 'bookmarks', label: '收藏夹', icon: Bookmark }, { id: 'starred', label: '我的 Star', icon: Star }, { id: 'history', label: '历史记录', icon: History }] as const;
+const authErrors: Record<string, string> = { denied: '你取消了 GitHub 授权，可以随时重试。', access_denied: '你取消了 GitHub 授权，可以随时重试。', invalid_state: '登录验证已过期，请重新登录。', missing_code: 'GitHub 未返回授权凭据，请重新登录。', oauth_failed: 'GitHub 授权失败，请重试。', exchange_failed: 'GitHub 暂时无法完成登录，请稍后重试。', unavailable: 'GitHub 连接暂时不可用，请稍后重试。', token_exchange_failed: 'GitHub 暂时无法完成登录，请稍后重试。', setup_failed: 'GitHub App 注册未完成，请重试。', setup_invalid_state: 'GitHub App 注册验证已过期，请重新登录。', setup_missing_code: 'GitHub App 注册未返回有效凭据，请重试。', setup_in_progress: 'GitHub App 正在注册，请稍后重新登录。', setup_denied: '你取消了 GitHub App 注册，可以随时重试。', not_configured: 'GitHub 连接暂时不可用，请稍后重试。' };
+function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
+function readStorage(key: string): unknown { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } }
+function saveStorage(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* State remains usable if storage is unavailable. */ } }
+function validRepo(value: unknown): value is Repo { return object(value) && typeof value.id === 'number' && value.id > 0 && typeof value.name === 'string' && typeof value.full_name === 'string' && typeof value.html_url === 'string' && object(value.owner) && typeof value.owner.login === 'string' && typeof value.owner.avatar_url === 'string' && (value.description === null || typeof value.description === 'string') && (value.language === null || typeof value.language === 'string') && (value.homepage === null || typeof value.homepage === 'string') && (value.license === null || (object(value.license) && typeof value.license.spdx_id === 'string')) && Array.isArray(value.topics) && value.topics.every(item => typeof item === 'string') && typeof value.stargazers_count === 'number' && typeof value.forks_count === 'number' && typeof value.open_issues_count === 'number' && typeof value.updated_at === 'string' && Number.isFinite(Date.parse(value.updated_at)); }
+function loadLibrary(): Library { const current = readStorage(LIBRARY_KEY), legacy = readStorage('repoflow.library.v1'), raw = object(current) ? current : object(legacy) ? legacy : {}; const result: Library = { bookmarks: {}, watchLater: {}, history: {}, hidden: {} }; for (const field of ['bookmarks', 'watchLater', 'history'] as const) if (object(raw[field])) for (const [key, value] of Object.entries(raw[field])) if (key !== 'demo' && Array.isArray(value)) result[field][key] = value.filter(validRepo).slice(0, field === 'history' ? 200 : 1000); if (object(raw.hidden)) for (const [key, value] of Object.entries(raw.hidden)) if (key !== 'demo' && Array.isArray(value)) result.hidden[key] = value.filter((item): item is number => typeof item === 'number'); return result; }
+function loadPreferences(): Record<string, Preferences> { const raw = readStorage(PREFS_KEY), result: Record<string, Preferences> = {}; if (!object(raw)) return result; for (const [key, value] of Object.entries(raw)) if (key !== 'demo' && object(value) && Array.isArray(value.topics) && Array.isArray(value.languages)) result[key] = { topics: [...new Set(value.topics.filter((item): item is string => typeof item === 'string' && interests.some(interest => interest.id === item)))].slice(0, 5), languages: [...new Set(value.languages.filter((item): item is string => typeof item === 'string' && languages.includes(item)))] }; return result; }
+async function api<T>(path: string, options: RequestInit = {}): Promise<T> { const response = await fetch(path, { ...options, credentials: 'same-origin' }); if (!response.ok) { const body = await response.json().catch(() => null); const error: ApiError = new Error(body?.error || `请求失败（${response.status}）`); error.status = response.status; if (typeof body?.code === 'string') error.code = body.code; throw error; } return response.status === 204 ? undefined as T : response.json(); }
+function mergeRepos(previous: Repo[], next: Repo[]) { const result = new Map(previous.map(repo => [repo.id, repo])); next.forEach(repo => result.set(repo.id, repo)); return [...result.values()]; }
+function validListSnapshot(value: unknown): value is ListSnapshot { return object(value) && typeof value.scope === 'string' && navItems.some(item => item.id === value.view) && ['query', 'search', 'category', 'language', 'sort', 'feedQuery'].every(key => typeof value[key] === 'string') && typeof value.visibleCount === 'number' && typeof value.page === 'number' && typeof value.hasMore === 'boolean' && Array.isArray(value.feed) && value.feed.every(validRepo); }
 
-  if (!token || !viewer) return <Navigate to="/login" replace />
-  if (libLogin !== viewer.login) return null // 本地数据还没载入
-  if (!onboarding && !onboarded) return <Navigate to="/onboarding" replace />
-  return <Outlet />
+function Modal({ title, close, children, footer }: { title: string; close: () => void; children: ReactNode; footer?: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null), closeRef = useRef(close); closeRef.current = close;
+  useEffect(() => { const previous = document.activeElement as HTMLElement | null, oldOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; const focusable = () => [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, select, [tabindex="0"]') || [])]; focusable()[0]?.focus(); const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') closeRef.current(); if (event.key === 'Tab') { const items = focusable(), first = items[0], last = items[items.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } } }; document.addEventListener('keydown', handler); return () => { document.body.style.overflow = oldOverflow; document.removeEventListener('keydown', handler); previous?.focus(); }; }, []);
+  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><div ref={ref} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-header"><h2 id="modal-title">{title}</h2><button className="icon-button" onClick={close} aria-label="关闭弹窗"><X size={20} /></button></div><div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}</div></div>;
+}
+function Avatar({ url, name, className = '' }: { url: string; name: string; className?: string }) { const [failed, setFailed] = useState(false); return <span className={`avatar ${className}`}>{!failed && safeUrl(url) ? <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} /> : name.slice(0, 1).toUpperCase()}</span>; }
+function RepoCard({ repo, starred, busy, saved, queued, reason, open, star, bookmark, watch, hide }: { repo: Repo; starred: boolean; busy: boolean; saved: boolean; queued: boolean; reason: string; open: (event: ReactMouseEvent<HTMLAnchorElement>) => void; star: () => void; bookmark: () => void; watch: () => void; hide: () => void }) {
+  const [menu, setMenu] = useState(false), menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!menu) return; const handler = (event: MouseEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenu(false); }; const keyHandler = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(false); }; document.addEventListener('mousedown', handler); document.addEventListener('keydown', keyHandler); return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', keyHandler); }; }, [menu]);
+  return <article className="repo-card"><a className="cover-button" href={projectPath(repo)} onClick={open} aria-label={`查看 ${repo.full_name} 详情`}><ProjectCover repo={repo} /></a><div className="repo-info"><Avatar url={repo.owner.avatar_url} name={repo.owner.login} /><div className="repo-copy"><a className="repo-title" href={projectPath(repo)} onClick={open}><h3>{repo.name}</h3></a><p className="card-description">{repo.description || '这个项目尚未提供简介。'}</p><div className="card-meta"><span>{repo.owner.login}</span><span>{formatRelativeTime(repo.updated_at)}</span></div><span className="reason-chip" title={reason}>{reason}</span></div><div className="card-controls"><button className={`icon-button star-button ${starred ? 'starred' : ''}`} disabled={busy} onClick={star} aria-label={`${starred ? '取消 Star' : 'Star'} ${repo.full_name}`} title={starred ? '取消 Star' : 'Star 项目'}>{busy ? <LoaderCircle size={19} className="spinning" /> : <Star size={20} fill={starred ? 'currentColor' : 'none'} />}</button><div className="card-menu-wrap" ref={menuRef}><button className="icon-button more-button" aria-label={`${repo.full_name} 更多操作`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu(!menu)}><MoreVertical size={20} /></button>{menu && <div className="card-menu" role="menu"><button role="menuitem" onClick={() => { watch(); setMenu(false); }}><Clock3 size={17} />{queued ? '移出稍后再看' : '稍后再看'}</button><button role="menuitem" onClick={() => { bookmark(); setMenu(false); }}><Bookmark size={17} fill={saved ? 'currentColor' : 'none'} />{saved ? '取消收藏' : '添加到收藏夹'}</button><button role="menuitem" onClick={() => { hide(); setMenu(false); }}><EyeOff size={17} />不感兴趣</button>{safeUrl(repo.html_url) && <a role="menuitem" href={safeUrl(repo.html_url)!} target="_blank" rel="noreferrer" onClick={() => setMenu(false)}><ExternalLink size={17} />在 GitHub 打开</a>}</div>}</div></div></div></article>;
 }
 
-/** 切换页面时回到顶部（首页自己会恢复之前的滚动位置） */
-function ScrollToTop() {
-  const { pathname } = useLocation()
+export default function App() {
+  const [session, setSession] = useState<Session>({ user: null, oauthConfigured: false, csrfToken: null }), [sessionError, setSessionError] = useState(''), [sessionReload, setSessionReload] = useState(0), [loginPending, setLoginPending] = useState(false);
+  const [view, setView] = useState<View>('home'), [collapsed, setCollapsed] = useState(false), [mobileOpen, setMobileOpen] = useState(false), [query, setQuery] = useState(''), [search, setSearch] = useState(''), [category, setCategory] = useState('recommended'), [language, setLanguage] = useState(''), [sort, setSort] = useState('recommended'), [filtersOpen, setFiltersOpen] = useState(false);
+  const [library, setLibrary] = useState(loadLibrary), [preferences, setPreferences] = useState(loadPreferences), [draft, setDraft] = useState<Preferences>(defaultPreferences), [settingsOpen, setSettingsOpen] = useState(false);
+  const [feed, setFeed] = useState<Repo[]>([]), [page, setPage] = useState(1), [hasMore, setHasMore] = useState(false), [loading, setLoading] = useState(false), [feedError, setFeedError] = useState(''), [reload, setReload] = useState(0), [visibleCount, setVisibleCount] = useState(24);
+  const [remoteStars, setRemoteStars] = useState<Repo[]>([]), [starPage, setStarPage] = useState(1), [starsMore, setStarsMore] = useState(false), [starsLoading, setStarsLoading] = useState(false), [starsError, setStarsError] = useState(''), [starOverrides, setStarOverrides] = useState<Record<number, boolean>>({}), [busyStars, setBusyStars] = useState<number[]>([]);
+  const [detailRoute, setDetailRoute] = useState<DetailRoute | null>(readDetailRoute), [detailVisit, setDetailVisit] = useState(0), [scrollRestore, setScrollRestore] = useState(0);
+  const [graphRoute, setGraphRoute] = useState<DetailRoute | null>(readGraphRoute);
+  const scrollPosition = useRef<number>(history.state?.scroll || 0), recordedDetail = useRef('');
+  const pendingDetailScroll = useRef<DetailScrollRestore | null>(null);
+  const restoredList = useRef<ListSnapshot | null>(null), [feedRestore, setFeedRestore] = useState(0);
+  const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null), [loginPrompt, setLoginPrompt] = useState(false);
+  const [profileState, setProfileState] = useState<{ login: string | null; data: RecommendationProfile | null; loading: boolean; error: string }>({ login: null, data: null, loading: false, error: '' });
+  const [profileRefresh, setProfileRefresh] = useState(0), [profileWarningsOpen, setProfileWarningsOpen] = useState(false);
+  const profileVersion = useRef(0), refreshForLogin = useRef<string | null>(null);
+  const requestVersion = useRef(0), starVersion = useRef(0), feedController = useRef<AbortController | null>(null), loadingRef = useRef(false), starsLoadingRef = useRef(false), sentinel = useRef<HTMLDivElement>(null), searchRef = useRef<HTMLInputElement>(null), filterRef = useRef<HTMLDivElement>(null);
+  const scope = session.user ? `github:${session.user.login}` : 'guest', prefs = preferences[scope] || defaultPreferences;
+  const activeScope = useRef(scope); activeScope.current = scope;
+  const manualPrefs = preferences[scope];
+  const profile = session.user && profileState.login === session.user.login ? profileState.data : null;
+  const profileLoading = !!session.user && (profileState.login !== session.user.login || profileState.loading);
+  const profileError = session.user && profileState.login === session.user.login ? profileState.error : '';
+  const isRecommendation = view === 'home' && category === 'recommended' && !search;
+  const learnedTopics = recommendationTopics(manualPrefs, profile);
+  const bookmarks = library.bookmarks[scope] || [], watchLater = library.watchLater[scope] || [], historyItems = library.history[scope] || [], hidden = library.hidden[scope] || [];
+  const notify = (text: string, undo?: () => void) => setToast({ text, undo });
+  const login = () => { setLoginPending(true); location.assign('/api/auth/github'); };
+  function sessionExpired() { setSession(previous => ({ ...previous, user: null, csrfToken: null })); setProfileState({ login: null, data: null, loading: false, error: '' }); setSessionReload(value => value + 1); notify('GitHub 登录已失效，请重新登录。'); }
+  function cancelDetailScroll() { const pending = pendingDetailScroll.current; if (!pending) return; cancelAnimationFrame(pending.frame); document.documentElement.style.overflowAnchor = pending.overflowAnchor; pendingDetailScroll.current = null; }
+  function detailRendered() {
+    const pending = pendingDetailScroll.current;
+    if (!pending) return;
+    if (pending.key !== readDetailRoute()?.key || pending.scope !== activeScope.current) { cancelDetailScroll(); return; }
+    cancelAnimationFrame(pending.frame);
+    const restore = () => { if (pendingDetailScroll.current === pending) window.scrollTo(0, pending.y); };
+    restore();
+    // Keep anchoring and history writes paused until the committed detail has painted.
+    pending.frame = requestAnimationFrame(() => { restore(); pending.frame = requestAnimationFrame(() => { if (pendingDetailScroll.current !== pending) return; restore(); history.replaceState({ ...history.state, scroll: window.scrollY }, ''); cancelDetailScroll(); }); });
+  }
+  useEffect(() => { saveStorage(LIBRARY_KEY, library); }, [library]);
+  useEffect(() => { saveStorage(PREFS_KEY, preferences); }, [preferences]);
   useEffect(() => {
-    if (pathname !== '/') window.scrollTo(0, 0)
-  }, [pathname])
-  return null
-}
+    const previous = history.scrollRestoration; history.scrollRestoration = 'manual'; history.replaceState({ ...history.state, repoFlow: true, scroll: history.state?.scroll || window.scrollY }, '');
+    let frame = 0;
+    const pop = () => {
+      cancelAnimationFrame(frame); cancelDetailScroll();
+      const nextRoute = readDetailRoute(), nextGraph = readGraphRoute(), snapshot = history.state?.listSnapshot;
+      scrollPosition.current = history.state?.scroll || 0;
+      if (nextRoute) { pendingDetailScroll.current = { key: nextRoute.key, scope: activeScope.current, y: scrollPosition.current, frame: 0, overflowAnchor: document.documentElement.style.overflowAnchor }; document.documentElement.style.overflowAnchor = 'none'; }
+      if (!nextRoute && !nextGraph && validListSnapshot(snapshot)) {
+        if (snapshot.scope === activeScope.current) { restoredList.current = snapshot; setView(snapshot.view); setQuery(snapshot.query); setSearch(snapshot.search); setCategory(snapshot.category); setLanguage(snapshot.language); setSort(snapshot.sort); setVisibleCount(snapshot.visibleCount); setFeed(snapshot.feed); setPage(snapshot.page); setHasMore(snapshot.hasMore); setFeedRestore(value => value + 1); }
+        else scrollPosition.current = 0;
+      }
+      setDetailRoute(nextRoute); setGraphRoute(nextGraph); setDetailVisit(value => value + 1); setScrollRestore(value => value + 1);
+    };
+    const scroll = () => { cancelAnimationFrame(frame); if (pendingDetailScroll.current) return; frame = requestAnimationFrame(() => { if (!pendingDetailScroll.current) history.replaceState({ ...history.state, scroll: window.scrollY }, ''); }); };
+    window.addEventListener('popstate', pop); window.addEventListener('scroll', scroll, { passive: true });
+    return () => { history.scrollRestoration = previous; cancelAnimationFrame(frame); cancelDetailScroll(); window.removeEventListener('popstate', pop); window.removeEventListener('scroll', scroll); };
+  }, []);
+  useLayoutEffect(() => { if (detailRoute && pendingDetailScroll.current) return; const y = scrollPosition.current; window.scrollTo(0, y); const frame = requestAnimationFrame(() => window.scrollTo(0, y)); if (!detailRoute && !graphRoute) document.title = 'RepoFlow — 发现开源项目'; return () => cancelAnimationFrame(frame); }, [detailRoute?.key, graphRoute?.key, scrollRestore]);
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(null), 4500); return () => clearTimeout(timer); }, [toast]);
+  useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key === 'k') { event.preventDefault(); searchRef.current?.focus(); } if (event.key === 'Escape') { setMobileOpen(false); setFiltersOpen(false); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, []);
+  useEffect(() => { if (!filtersOpen) return; const handler = (event: MouseEvent) => { if (!filterRef.current?.contains(event.target as Node)) setFiltersOpen(false); }; document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler); }, [filtersOpen]);
+  useEffect(() => { if (!restoredList.current) setVisibleCount(24); }, [view, search, language, category, sort, scope]);
+  useEffect(() => { const controller = new AbortController(); setSessionError(''); api<Session>('/api/session', { signal: controller.signal }).then(setSession).catch(error => { if (error.name !== 'AbortError') setSessionError('无法读取登录状态。你仍可浏览公开项目。'); }); return () => controller.abort(); }, [sessionReload]);
+  useEffect(() => { const params = new URLSearchParams(location.search), code = params.get('auth_error'); if (code) { notify(authErrors[code] || `GitHub 登录未完成（${code}），请重试。`); params.delete('auth_error'); history.replaceState({}, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`); } }, []);
+  useEffect(() => {
+    const login = session.user?.login || null, version = ++profileVersion.current, controller = new AbortController();
+    setProfileWarningsOpen(false);
+    if (!login) { setProfileState({ login: null, data: null, loading: false, error: '' }); return () => controller.abort(); }
+    const force = refreshForLogin.current === login; refreshForLogin.current = null;
+    setProfileState(previous => ({ login, data: previous.login === login ? previous.data : null, loading: true, error: '' }));
+    api<RecommendationProfile>(`/api/recommendation-profile${force ? '?refresh=1' : ''}`, { signal: controller.signal }).then(result => {
+      if (controller.signal.aborted || version !== profileVersion.current) return;
+      if (result.login !== login) throw new Error('账号画像与当前登录账号不一致，请重试。');
+      setProfileState({ login, data: result, loading: false, error: '' });
+    }).catch(error => {
+      if (controller.signal.aborted || version !== profileVersion.current) return;
+      if ((error as ApiError).status === 401) { setProfileState({ login: null, data: null, loading: false, error: '' }); setSession(previous => ({ ...previous, user: null, csrfToken: null })); setSessionReload(value => value + 1); notify('GitHub 登录已失效，请重新登录。'); return; }
+      setProfileState(previous => ({ login, data: previous.login === login ? previous.data : null, loading: false, error: error instanceof Error ? error.message : '暂时无法读取账号兴趣' }));
+    });
+    return () => controller.abort();
+  }, [session.user?.login, profileRefresh]);
+  function refreshProfile() { refreshForLogin.current = session.user?.login || null; setProfileRefresh(value => value + 1); }
 
-/**
- * 用 HashRouter（地址形如 index.html#/repo/x/y）：
- * 网页版放在 GitHub Pages 的子路径下、桌面版从本地文件加载，都不需要服务器做路由回退。
- */
-export function App() {
-  // GitHub OAuth 授权后会带着 ?code=...&state=... 跳回首页
-  const params = new URLSearchParams(window.location.search)
-  if (params.has('code') && params.has('state')) return <OAuthCallback />
+  async function loadStars(nextPage: number, append: boolean, version = starVersion.current) {
+    if (!session.user || starsLoadingRef.current) return; starsLoadingRef.current = true; setStarsLoading(true); setStarsError('');
+    try { const result = await api<{ items: Repo[]; hasMore: boolean }>(`/api/starred?page=${nextPage}`); if (version !== starVersion.current) return; setRemoteStars(previous => append ? mergeRepos(previous, result.items) : result.items); setStarPage(nextPage); setStarsMore(result.hasMore);
+    } catch (error) { if (version === starVersion.current) setStarsError(error instanceof Error ? error.message : '无法读取 GitHub Star'); } finally { if (version === starVersion.current) { starsLoadingRef.current = false; setStarsLoading(false); } }
+  }
+  useEffect(() => { starVersion.current += 1; starsLoadingRef.current = false; setRemoteStars([]); setStarsMore(false); setStarsError(''); setStarsLoading(false); setStarOverrides({}); if (session.user) void loadStars(1, false, starVersion.current); }, [session.user?.login]);
+  const feedQuery = useMemo(() => { const params = new URLSearchParams(); params.set('sort', category === 'week' || category === 'month' ? 'stars' : sort); if (category === 'week' || category === 'month') params.set('range', category); const topics = category === 'recommended' ? search ? [] : learnedTopics : category === 'week' || category === 'month' ? [] : [category]; if (topics.length) params.set('topics', topics.slice(0, 5).join(',')); const learnedLanguage = category === 'recommended' && !search && profile && !profile.topics.length ? profile.languages[0]?.name : ''; if (language || learnedLanguage) params.set('language', language || learnedLanguage); if (search) params.set('q', search); return params.toString(); }, [category, sort, language, search, learnedTopics.join(','), profile]);
+  async function fetchPage(nextPage: number, append: boolean, version: number, signal: AbortSignal) {
+    loadingRef.current = true; setLoading(true); setFeedError('');
+    try { const result = await api<{ items: Repo[]; hasMore: boolean }>(`/api/feed?${feedQuery}&page=${nextPage}`, { signal }); if (version !== requestVersion.current || signal.aborted) return; setFeed(previous => append ? mergeRepos(previous, result.items) : result.items); setHasMore(result.hasMore); setPage(nextPage); }
+    catch (error) { if (version === requestVersion.current && !signal.aborted) setFeedError(error instanceof Error ? error.message : '项目加载失败'); }
+    finally { if (version === requestVersion.current && !signal.aborted) { loadingRef.current = false; setLoading(false); } }
+  }
+  useEffect(() => {
+    requestVersion.current += 1; feedController.current?.abort(); const controller = new AbortController(); feedController.current = controller; const snapshot = restoredList.current; restoredList.current = null; setFeedError(''); loadingRef.current = false; setLoading(false);
+    if (snapshot && snapshot.scope === scope && snapshot.view === view && snapshot.feedQuery === feedQuery) { setFeed(snapshot.feed); setPage(snapshot.page); setHasMore(snapshot.hasMore); }
+    else { setFeed([]); setHasMore(false); setPage(1); if (view === 'home') void fetchPage(1, false, requestVersion.current, controller.signal); }
+    return () => { controller.abort(); feedController.current?.abort(); };
+  }, [view, feedQuery, reload, scope, feedRestore]);
+  function nextFeedPage() { if (detailRoute || graphRoute || view !== 'home' || loadingRef.current || !hasMore || feedError) return; const controller = new AbortController(); feedController.current = controller; void fetchPage(page + 1, true, requestVersion.current, controller.signal); }
+  useEffect(() => { if (detailRoute || graphRoute || view !== 'home' || !hasMore || loading || feedError || !sentinel.current || !('IntersectionObserver' in window)) return; const observer = new IntersectionObserver(entries => { if (entries[0]?.isIntersecting) nextFeedPage(); }, { rootMargin: '360px' }); observer.observe(sentinel.current); return () => observer.disconnect(); }, [view, page, hasMore, loading, feedError, feedQuery, detailRoute?.key, graphRoute?.key]);
 
-  return (
-    <HashRouter>
-      <ScrollToTop />
-      <Routes>
-        <Route path="/login" element={<><LoginPage /><Toasts /></>} />
-        <Route element={<RequireAuth onboarding />}>
-          <Route path="/onboarding" element={<OnboardingPage />} />
-        </Route>
-        <Route element={<RequireAuth />}>
-          <Route element={<Layout />}>
-            <Route index element={<HomePage />} />
-            <Route path="/repo/:owner/:name" element={<RepoPage />} />
-            <Route path="/later" element={<LaterPage />} />
-            <Route path="/saved" element={<SavedPage />} />
-            <Route path="/saved/:folderId" element={<SavedPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/stars" element={<StarsPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </HashRouter>
-  )
+  function leaveDetail() { cancelDetailScroll(); if (detailRoute || graphRoute) { history.replaceState({ ...history.state, scroll: window.scrollY }, ''); history.pushState({ repoFlow: true, scroll: 0 }, '', '/'); setDetailRoute(null); setGraphRoute(null); } scrollPosition.current = 0; setScrollRestore(value => value + 1); }
+  function navigate(next: View) { leaveDetail(); setView(next); setMobileOpen(false); setQuery(''); setSearch(''); setLanguage(''); setCategory('recommended'); setFiltersOpen(false); window.scrollTo({ top: 0 }); }
+  function submitSearch(event: FormEvent) { event.preventDefault(); if (detailRoute || graphRoute) { leaveDetail(); setView('home'); setCategory('recommended'); } setSearch(query.trim()); setFiltersOpen(false); }
+  function openSettings() { setDraft({ topics: [...prefs.topics], languages: [...prefs.languages] }); setSettingsOpen(true); setMobileOpen(false); setFiltersOpen(false); }
+  function openRoute(path: string) { if (location.pathname === path) return; const nextDetail = readDetailRoute(path), nextGraph = readGraphRoute(path); if (!nextDetail && !nextGraph) return; cancelDetailScroll(); const snapshot: ListSnapshot = { scope, view, query, search, category, language, sort, visibleCount, feedQuery, feed, page, hasMore }; history.replaceState({ ...history.state, scroll: window.scrollY, ...(!detailRoute && !graphRoute ? { listSnapshot: snapshot } : {}) }, ''); const previousDepth = Number(history.state?.listDepth) || 0, listDepth = detailRoute || graphRoute ? previousDepth ? previousDepth + 1 : 0 : 1; history.pushState({ repoFlow: true, scroll: 0, listDepth }, '', path); scrollPosition.current = 0; setDetailRoute(nextDetail); setGraphRoute(nextGraph); setDetailVisit(value => value + 1); setFiltersOpen(false); setMobileOpen(false); setScrollRestore(value => value + 1); }
+  function openGraphLink(event: ReactMouseEvent<HTMLAnchorElement>, path: string) { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.defaultPrevented) return; event.preventDefault(); openRoute(path); }
+  function openRepo(event: ReactMouseEvent<HTMLAnchorElement>, repo: Repo) { openGraphLink(event, projectPath(repo)); }
+  function returnToList() { const depth = Number(history.state?.listDepth) || 0; if (detailRoute && depth > 0) history.go(-depth); else navigate('home'); }
+  function recordDetail(repo: Repo) { const visit = `${scope}:${detailRoute?.key}:${detailVisit}`; if (recordedDetail.current === visit) return; recordedDetail.current = visit; setLibrary(previous => ({ ...previous, history: { ...previous.history, [scope]: [repo, ...(previous.history[scope] || []).filter(item => item.id !== repo.id)].slice(0, 200) } })); }
+  function searchTopic(topic: string) { leaveDetail(); setView('home'); setCategory('recommended'); setLanguage(''); setQuery(`topic:${topic}`); setSearch(`topic:${topic}`); }
+  function toggleLibrary(field: 'bookmarks' | 'watchLater', repo: Repo) { const exists = (library[field][scope] || []).some(item => item.id === repo.id); setLibrary(previous => { const list = previous[field][scope] || []; return { ...previous, [field]: { ...previous[field], [scope]: exists ? list.filter(item => item.id !== repo.id) : [repo, ...list] } }; }); notify(field === 'bookmarks' ? exists ? '已取消收藏' : '已添加到收藏夹' : exists ? '已移出稍后再看' : '已添加到稍后再看'); }
+  function hideRepo(repo: Repo) { setLibrary(previous => ({ ...previous, hidden: { ...previous.hidden, [scope]: [...new Set([...(previous.hidden[scope] || []), repo.id])] } })); notify('已隐藏此项目', () => setLibrary(previous => ({ ...previous, hidden: { ...previous.hidden, [scope]: (previous.hidden[scope] || []).filter(id => id !== repo.id) } }))); }
+  function restoreHidden() { setLibrary(previous => ({ ...previous, hidden: { ...previous.hidden, [scope]: [] } })); notify('已恢复不感兴趣的项目'); }
+  function isStarred(repo: Repo) { return starOverrides[repo.id] ?? (detailRoute || view === 'home' ? repo.viewer_starred : undefined) ?? remoteStars.some(item => item.id === repo.id); }
+  async function toggleStar(repo: Repo) { if (!session.user) { setLoginPrompt(true); return; } if (busyStars.includes(repo.id)) return; const version = starVersion.current; setBusyStars(previous => [...previous, repo.id]); try { const path = `/api/starred/${encodeURIComponent(repo.owner.login)}/${encodeURIComponent(repo.name)}`, current = await api<{ starred: boolean }>(path); await api<void>(path, { method: current.starred ? 'DELETE' : 'PUT', headers: { 'X-CSRF-Token': session.csrfToken || '' } }); if (version !== starVersion.current) return; setStarOverrides(previous => ({ ...previous, [repo.id]: !current.starred })); setRemoteStars(previous => current.starred ? previous.filter(item => item.id !== repo.id) : mergeRepos([repo], previous)); notify(current.starred ? '已在 GitHub 取消 Star' : '已在 GitHub 点亮 Star'); } catch (error) { if (version === starVersion.current) notify(error instanceof Error ? error.message : 'Star 操作失败，请重试'); } finally { setBusyStars(previous => previous.filter(id => id !== repo.id)); } }
+  async function logout() { try { await api<void>('/api/logout', { method: 'POST', headers: { 'X-CSRF-Token': session.csrfToken || '' } }); setSession(previous => ({ ...previous, user: null, csrfToken: null })); notify('已退出 GitHub'); setSessionReload(value => value + 1); } catch (error) { notify(error instanceof Error ? error.message : '退出失败'); } }
+  const score = (repo: Repo) => recommendationScore(repo, manualPrefs, profile);
+  const profileStarredIds = useMemo(() => new Set(profile?.starredIds || []), [profile]);
+  const profileOwnedIds = useMemo(() => new Set(profile?.ownedIds || []), [profile]);
+  const baseItems = view === 'home' ? feed : view === 'starred' ? remoteStars : view === 'bookmarks' ? bookmarks : view === 'watchLater' ? watchLater : historyItems;
+  const filtered = [...baseItems].filter(repo => {
+    if (view === 'home') {
+      if (hidden.includes(repo.id)) return false;
+      if (isRecommendation && session.user) {
+        if (profileOwnedIds.has(repo.id) || repo.owner.login.toLowerCase() === session.user.login.toLowerCase()) return false;
+        const alreadyStarred = starOverrides[repo.id] ?? (Boolean(repo.viewer_starred) || profileStarredIds.has(repo.id));
+        if (alreadyStarred) return false;
+      }
+      return true;
+    }
+    if (language && repo.language !== language) return false;
+    return search.toLowerCase().split(/\s+/).filter(Boolean).every(token => token.startsWith('topic:') ? repo.topics.includes(token.slice(6)) : token.startsWith('language:') ? repo.language?.toLowerCase() === token.slice(9) : `${repo.full_name} ${repo.description || ''} ${repo.topics.join(' ')}`.toLowerCase().includes(token));
+  });
+  if (view === 'home' || view !== 'history' && sort !== 'recommended') { if (category === 'week' || category === 'month' || sort === 'stars') filtered.sort((a, b) => b.stargazers_count - a.stargazers_count); else if (sort === 'updated') filtered.sort((a, b) => b.updated_at.localeCompare(a.updated_at)); else filtered.sort((a, b) => score(b) - score(a)); }
+  const items = view === 'home' ? filtered : filtered.slice(0, visibleCount), busy = view === 'home' ? loading : view === 'starred' ? starsLoading : false, error = view === 'home' ? feedError : view === 'starred' ? starsError : '';
+  const canLoadMore = view === 'home' ? hasMore : filtered.length > visibleCount || view === 'starred' && starsMore;
+  const reason = (repo: Repo) => { if (category === 'week') return '本周新星'; if (category === 'month') return '本月热门项目'; if (category === 'llm') return '大模型 / LLM'; if (sort === 'recommended') { const learned = profileReason(repo, profile); if (learned) return learned; } const matched = matchingInterests(repo).find(interest => prefs.topics.includes(interest.id)); if (matched) return `你感兴趣的${matched.label}`; if (repo.language && prefs.languages.includes(repo.language)) return `你偏爱的 ${repo.language}`; return sort === 'stars' ? '社区热门项目' : sort === 'updated' ? '最近活跃的项目' : '发现新的开源项目'; };
+  const activeNav = navItems.find(item => item.id === view)!;
+
+  return <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
+    <header className="topbar"><div className="header-brand"><button className="icon-button hamburger" aria-label={collapsed ? '展开导航' : '折叠导航'} onClick={() => { if (matchMedia('(max-width: 720px)').matches) setMobileOpen(!mobileOpen); else setCollapsed(!collapsed); }}><Menu size={23} /></button><button className="brand" onClick={() => navigate('home')}><span className="brand-icon"><Star size={18} fill="currentColor" /></span><strong>RepoFlow</strong></button></div><form className="search-box" onSubmit={submitSearch}><input ref={searchRef} aria-label="搜索项目" placeholder="搜索项目、topic:llm 或 language:rust" value={query} onChange={event => setQuery(event.target.value)} />{query && <button type="button" className="search-clear icon-button" aria-label="清空搜索" onClick={() => { setQuery(''); setSearch(''); }}><X size={17} /></button>}<button className="search-submit" type="submit" aria-label="搜索"><Search size={21} /></button></form><div className="topbar-actions">{session.user ? <><Avatar url={session.user.avatar_url} name={session.user.login} className="profile-avatar" /><button className="icon-button logout" onClick={() => void logout()} aria-label="退出 GitHub" title={`已登录 ${session.user.login}，点击退出`}><LogOut size={18} /></button></> : <button className="button login-button" disabled={loginPending} onClick={login}>{loginPending ? <LoaderCircle size={17} className="spinning" /> : <Github size={19} />}<span>{loginPending ? '正在前往 GitHub…' : 'GitHub 登录'}</span></button>}</div></header>
+    {mobileOpen && <button className="sidebar-overlay" aria-label="关闭导航" onClick={() => setMobileOpen(false)} />}
+    <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}><nav className="nav-list" aria-label="主要导航">{navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-button ${!detailRoute && !graphRoute && view === id ? 'active' : ''}`} onClick={() => navigate(id)} title={label}><Icon size={21} fill={view === id && id === 'home' ? 'currentColor' : 'none'} /><span>{label}</span>{id === 'watchLater' && watchLater.length > 0 && <small>{watchLater.length}</small>}{id === 'bookmarks' && bookmarks.length > 0 && <small>{bookmarks.length}</small>}</button>)}<a className={`nav-button ${graphRoute ? 'active' : ''}`} href="/graph" onClick={event => openGraphLink(event, '/graph')} title="技术图谱"><Network size={21} /><span>技术图谱</span></a><div className="nav-divider" /><button className="nav-button" onClick={openSettings} title="偏好设置"><Settings2 size={21} /><span>偏好设置</span></button></nav><div className="sidebar-bottom"><a href="https://github.com" target="_blank" rel="noreferrer"><Github size={15} /><span>数据来自 GitHub</span><ArrowUpRight size={12} /></a><small>RepoFlow © 2026</small></div></aside>
+    <main className="workspace">{detailRoute && <Suspense fallback={<div className="detail-module-loading" role="status"><LoaderCircle size={22} className="spinning" /><span>正在加载项目页面…</span></div>}><ProjectDetail key={`${detailRoute.key}:${scope}`} owner={detailRoute.owner} name={detailRoute.name} account={scope} csrfToken={session.csrfToken} sessionError={sessionError} onSessionRetry={() => setSessionReload(value => value + 1)} onGraphNavigate={openGraphLink} onGraphRoute={openRoute} related={items} isStarred={isStarred} busyStars={busyStars} bookmarks={bookmarks} watchLater={watchLater} onStar={repo => void toggleStar(repo)} onBookmark={repo => toggleLibrary('bookmarks', repo)} onWatch={repo => toggleLibrary('watchLater', repo)} onLoaded={recordDetail} onRendered={detailRendered} restoreVersion={scrollRestore} onBack={returnToList} onTopic={searchTopic} onProject={openRepo} reason={reason} notify={notify} onSessionExpired={sessionExpired} /></Suspense>}{graphRoute && <Suspense fallback={<div className="detail-module-loading" role="status"><LoaderCircle size={22} className="spinning" /><span>正在加载技术图谱工作台…</span></div>}><TechnologyGraph key={`${graphRoute.key}:${scope}`} owner={graphRoute.owner} name={graphRoute.name} account={scope} csrfToken={session.csrfToken} sessionError={sessionError} onSessionRetry={() => setSessionReload(value => value + 1)} onSessionExpired={sessionExpired} onNavigate={openGraphLink} onRoute={openRoute} /></Suspense>}<div className="list-page" hidden={!!detailRoute || !!graphRoute}><div className="category-bar"><div className="category-scroll">{[{ id: 'recommended', label: '推荐' }, { id: 'week', label: '本周新星' }, { id: 'month', label: '本月热门' }, { id: 'llm', label: '大模型 / LLM' }, ...interests.map(interest => ({ id: interest.id, label: interest.label }))].map(item => <button key={item.id} className={`topic-chip ${category === item.id ? 'active' : ''}`} onClick={() => { setCategory(item.id); if (view !== 'home') { setView('home'); setQuery(''); setSearch(''); } }}>{item.label}</button>)}</div><div className="filter-wrap" ref={filterRef}><button className={`icon-button filter-button ${filtersOpen || language ? 'active' : ''}`} aria-label="筛选项目" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={19} /></button>{filtersOpen && <div className="filter-popover"><strong>筛选项目</strong><label>编程语言<select aria-label="编程语言" value={language} onChange={event => setLanguage(event.target.value)}><option value="">所有语言</option>{languages.map(item => <option key={item}>{item}</option>)}</select></label><label>排序方式<select aria-label="排序方式" value={sort} onChange={event => setSort(event.target.value)}><option value="recommended">推荐排序</option><option value="stars">最多 Star</option><option value="updated">最近更新</option></select></label><button onClick={openSettings}><Settings2 size={16} />管理兴趣与语言偏好</button>{hidden.length > 0 && <button onClick={restoreHidden}><Undo2 size={16} />恢复隐藏的 {hidden.length} 个项目</button>}</div>}</div></div>
+      <div className="feed-content">{session.user && isRecommendation && <section className="recommendation-status" aria-label="账号兴趣分析"><div className="recommendation-status-row"><div className="recommendation-facts" role="status">{profileLoading ? <><LoaderCircle size={14} className="spinning" /><span>正在读取 Star 与公开仓库…</span></> : profileError ? <span className="recommendation-error">兴趣读取失败：{profileError} · 仍可按已有兴趣浏览</span> : profile ? <span>已分析 <strong>{formatNumber(profile.counts.starred)}</strong> 个 Star · <strong>{formatNumber(profile.counts.owned)}</strong> 个公开仓库</span> : <span>暂未读取账号兴趣</span>}{profile && !profileLoading && (profile.truncated.starred || profile.truncated.owned) && <span className="recommendation-range">范围：{[profile.truncated.starred ? `最近 ${profile.limits.starred} 个 Star` : null, profile.truncated.owned ? `最近 ${profile.limits.owned} 个公开仓库` : null].filter(Boolean).join(' · ')}</span>}</div><button className="profile-refresh" onClick={refreshProfile} disabled={profileLoading}><RefreshCw size={13} />{profileError ? '重试' : '刷新兴趣'}</button></div>{profile && !profileLoading && profile.warnings.length > 0 && <div className="recommendation-warnings"><button onClick={() => setProfileWarningsOpen(!profileWarningsOpen)} aria-expanded={profileWarningsOpen}>{profile.warnings.length} 条读取提示{profileWarningsOpen ? ' · 收起' : ' · 展开'}</button>{profileWarningsOpen && <ul>{profile.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}</div>}</section>}{sessionError && <div className="session-error"><span>{sessionError}</span><button onClick={() => setSessionReload(value => value + 1)}>重试</button></div>}{view !== 'home' && <div className="library-heading"><div><activeNav.icon size={23} /><h1>{activeNav.label}</h1><span>{filtered.length}</span></div>{view === 'history' && historyItems.length > 0 && <button className="button secondary" onClick={() => { setLibrary(previous => ({ ...previous, history: { ...previous.history, [scope]: [] } })); notify('已清空浏览历史'); }}><Trash2 size={16} />清空历史</button>}</div>}{search && <div className="search-summary"><span>“{search}” 的搜索结果</span><button onClick={() => { setQuery(''); setSearch(''); }}><X size={14} />清除</button></div>}{language && <div className="active-filter"><span>{language}<button aria-label="移除语言筛选" onClick={() => setLanguage('')}><X size={13} /></button></span></div>}
+      {error && <div className="error-state"><RefreshCw size={28} /><h3>暂时无法加载项目</h3><p>{error}</p><button className="button primary" onClick={() => view === 'starred' ? void loadStars(1, false) : setReload(value => value + 1)}>重新加载</button></div>}
+      {view === 'starred' && !session.user ? <div className="empty-state"><Star size={38} /><h3>查看你在 GitHub 上的 Star</h3><p>登录后，与 GitHub 同步关注的项目。</p><button className="button primary" disabled={loginPending} onClick={login}><Github size={18} />{loginPending ? '正在前往 GitHub…' : '登录 GitHub'}</button></div> : <><div className="repo-grid">{items.map(repo => <RepoCard key={repo.id} repo={repo} starred={isStarred(repo)} busy={busyStars.includes(repo.id)} saved={bookmarks.some(item => item.id === repo.id)} queued={watchLater.some(item => item.id === repo.id)} reason={reason(repo)} open={event => openRepo(event, repo)} star={() => void toggleStar(repo)} bookmark={() => toggleLibrary('bookmarks', repo)} watch={() => toggleLibrary('watchLater', repo)} hide={() => hideRepo(repo)} />)}{busy && !items.length && Array.from({ length: 12 }, (_, index) => <div className="skeleton-card" key={index} aria-hidden="true"><div className="skeleton-cover" /><div className="skeleton-info"><i /><div><i /><i /><i /></div></div></div>)}</div>{!busy && !items.length && !error && !(view === 'home' && hasMore) && <div className="empty-state"><activeNav.icon size={38} /><h3>{search || language ? '没有找到匹配的项目' : view === 'bookmarks' ? '收藏夹还是空的' : view === 'watchLater' ? '还没有稍后再看的项目' : view === 'history' ? '还没有浏览记录' : view === 'starred' ? '还没有关注的项目' : '暂时没有项目'}</h3><p>{search || language ? '试试其他关键词，或调整筛选条件。' : view === 'history' ? '打开项目详情后，会自动记在这里。' : '浏览项目时，可通过三点菜单保存喜欢的项目。'}</p><button className="button secondary" onClick={() => { if (search || language) { setQuery(''); setSearch(''); setLanguage(''); } else navigate('home'); }}>{search || language ? '清除筛选' : '返回首页'}</button>{view === 'home' && hidden.length > 0 && <button className="text-button" onClick={restoreHidden}>恢复隐藏项目</button>}</div>}{canLoadMore && !error && <div className="load-more" ref={sentinel}><button className="button secondary" disabled={busy} onClick={() => { if (view === 'home') nextFeedPage(); else if (view === 'starred' && filtered.length <= visibleCount && starsMore) { void loadStars(starPage + 1, true); setVisibleCount(value => value + 100); } else setVisibleCount(value => value + 24); }}>{busy ? <LoaderCircle size={17} className="spinning" /> : <Plus size={17} />}{busy ? '正在加载…' : '加载更多'}</button></div>}</>}
+      </div>
+    </div></main>
+    {settingsOpen && <Modal title="偏好设置" close={() => setSettingsOpen(false)} footer={<><button className="button secondary" onClick={() => setDraft({ topics: [...defaultPreferences.topics], languages: [] })}>恢复默认</button><button className="button primary" onClick={() => { setPreferences(previous => ({ ...previous, [scope]: draft })); setSettingsOpen(false); notify('偏好已保存'); }}><Check size={16} />保存</button></>}><p className="settings-intro">登录后会自动分析你的 Star 与本人公开仓库。手动选择的方向与语言会补充首页推荐。</p><div className="settings-section-title"><h3>兴趣方向</h3><span>最多 5 个 · 已选 {draft.topics.length}</span></div><div className="interest-options">{interests.map(interest => { const chosen = draft.topics.includes(interest.id); return <button className={`interest-option ${chosen ? 'selected' : ''}`} key={interest.id} aria-pressed={chosen} onClick={() => { if (!chosen && draft.topics.length >= 5) { notify('最多选择 5 个兴趣方向'); return; } setDraft(previous => ({ ...previous, topics: chosen ? previous.topics.filter(item => item !== interest.id) : [...previous.topics, interest.id] })); }}><span>{interest.emoji}</span><strong>{interest.label}</strong>{chosen ? <Check size={16} /> : <Plus size={16} />}</button>; })}</div><div className="settings-section-title"><h3>偏爱的语言</h3><span>可多选</span></div><div className="language-options">{languages.map(item => <button className={`topic-chip ${draft.languages.includes(item) ? 'active' : ''}`} key={item} aria-pressed={draft.languages.includes(item)} onClick={() => setDraft(previous => ({ ...previous, languages: previous.languages.includes(item) ? previous.languages.filter(value => value !== item) : [...previous.languages, item] }))}><i style={{ background: languageColors[item] }} />{item}</button>)}</div><p className="settings-note">手动偏好与本地收藏按 GitHub 账号分别保存，手动选择不会被自动分析覆盖。</p>{hidden.length > 0 && <button className="button secondary" onClick={restoreHidden}><Undo2 size={15} />恢复 {hidden.length} 个隐藏项目</button>}</Modal>}
+    {loginPrompt && <Modal title="登录 GitHub" close={() => setLoginPrompt(false)} footer={<><button className="button secondary" onClick={() => setLoginPrompt(false)}>取消</button><button className="button primary" disabled={loginPending} onClick={login}><Github size={17} />{loginPending ? '正在前往 GitHub…' : '前往 GitHub'}</button></>}><p className="login-description">登录后，即可把 Star 同步至你的 GitHub 账号。</p><p className="settings-note">稍后再看与收藏夹无需登录，也可以保存在当前浏览器。</p></Modal>}
+    {toast && <div className="toast" role="status"><Check size={16} /><span>{toast.text}</span>{toast.undo && <button onClick={() => { toast.undo?.(); setToast(null); }}>撤销</button>}<button className="icon-button" aria-label="关闭提示" onClick={() => setToast(null)}><X size={15} /></button></div>}
+  </div>;
 }
