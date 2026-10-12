@@ -18,10 +18,13 @@ interface StarState {
   pending: Record<string, boolean>
   toggle: (repo: Repo) => Promise<boolean>
   ensureStarred: (repo: Repo) => Promise<boolean>
+  reset: () => void
 }
 
 export const useStars = create<StarState>((set, get) => {
+  let generation = 0
   const apply = async (repo: Repo, want: boolean, silent = false) => {
+    const requestGeneration = generation
     const { overrides, pending } = get()
     if (pending[repo.id]) return want
     const prev = overrides[repo.id] ?? { starred: repo.viewerHasStarred, stars: repo.stars }
@@ -34,17 +37,21 @@ export const useStars = create<StarState>((set, get) => {
     })
     try {
       const res = await setStarred(repo.id, want)
+      if (requestGeneration !== generation) return prev.starred
       set({ overrides: { ...get().overrides, [repo.id]: { starred: res.starred, stars: res.stars } } })
       if (want) useLibrary.getState().addEvent('star', repo)
       if (!silent) toast(want ? `已 Star ${repo.name}` : `已取消 Star ${repo.name}`)
       return res.starred
     } catch (err) {
+      if (requestGeneration !== generation) return prev.starred
       set({ overrides: { ...get().overrides, [repo.id]: prev } })
       toastError(err)
       return prev.starred
     } finally {
-      const { [repo.id]: _drop, ...rest } = get().pending
-      set({ pending: rest })
+      if (requestGeneration === generation) {
+        const { [repo.id]: _drop, ...rest } = get().pending
+        set({ pending: rest })
+      }
     }
   }
 
@@ -56,6 +63,10 @@ export const useStars = create<StarState>((set, get) => {
       return apply(repo, !cur)
     },
     ensureStarred: (repo) => apply(repo, true, true),
+    reset: () => {
+      generation++
+      set({ overrides: {}, pending: {} })
+    },
   }
 })
 

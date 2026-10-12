@@ -29,6 +29,7 @@ It is fully open source and has no server of its own: your token stays on your d
 ## Features
 
 - **A feed picked for you.** Recommendations come from what you've recently starred, your own repositories, the interests you choose, public stars from people you follow, and what you do in the app (star, save, open, qualified reading, "not interested"). Every card says why it's there: "because you starred X", "@someone starred this", "new this week".
+- **Three recommendation modes.** Home and Settings share Normal, Something different and Random. Each mode keeps its own list and scroll position during the current app session, so switching back resumes where you left off.
 - **Following weights.** Adjust each sampled person's recommendation influence in Settings from 0 to 3, with a default of 1. A weight of 0 excludes their influence without unfollowing them on GitHub.
 - **Channels.** For you, Following (what people you follow just starred), New this week, Hot this month, plus one channel per interest (bioinformatics, LLMs, Rust…).
 - **One-click actions.**
@@ -97,20 +98,24 @@ Two workflows live in `.github/workflows/`:
 
 ## How recommendations work
 
-Everything runs on your device; see `src/lib/recommend.ts`.
+Everything runs on your device, with the same `src/lib/recommend.ts` in the web and desktop apps. Normal recommendations follow these steps:
 
 1. **Profile.** Weights for each topic and language, from your latest 100 stars (newer stars count more), your own repositories, your chosen interests (strongest signal), sampled public stars from people you follow, and in-app actions (star +2.5, save +2, watch later +1, open +0.6, qualified reading +0.3, not interested −3, with a 30-day half-life).
-2. **Candidates.** A few topics are sampled by weight (each searched three ways: all-time top, recently active, new this year), plus "similar to something you starred", "new in your languages", "new this week" and "something different". All of them go out as **one** GraphQL request.
+2. **Candidates.** A few topics are sampled by weight (each searched three ways: all-time top, recently active, new this year), plus "similar to something you starred", "new in your languages", "new this week" and "something different". Each round combines its searches into **one** GraphQL request.
 3. **Filtering.** Drops anything already starred, owned by you, marked not interested, in a hidden topic or language, or shown in the last 3 days.
 4. **Ranking.** 50% interest match + 25% popularity + 15% recent activity + a little randomness, then spread out so the same owner, language or source doesn't cluster.
 5. Projects starred by people you follow are mixed in, prioritized by the person's weight and how recently they starred the project.
 
 The "how Gitube sees you" section in Settings shows your current profile. The following influence controls list only people whose star samples were actually retrieved: up to 50 people, with their 6 most recent public stars each. This does not cover all their interests. Contributions are normalized per person and decay with a 30-day half-life, so more samples do not automatically mean more influence. A weight of 0 leaves the original Following channel unchanged.
 
+"Something different" classifies actual candidates using the topics of your explicitly chosen, unblocked interests. It targets roughly 50% inside those interests and 50% outside; either side fills a shortage on the other. Without usable chosen interests, this mode is unavailable and switches back to Normal. "Random" searches public projects using random creation windows, star ranges and sort variants, then shuffles the actual candidate pool. It is not uniform sampling across all of GitHub. Both exploration modes use at most 3 rounds of 8 search conditions per batch, skip profile and following-weight ranking, and do not insert targeted social picks. Existing filters still apply; stars, saves, opens and qualified reading continue to accumulate for Normal recommendations.
+
+Each mode has separate pagination progress while sharing recent-exposure and feedback filters. "重置推荐记录" (Reset recommendation history) in Settings restores Normal and default following weights, and clears recommendation feedback, hidden topics and languages, exposures, reading signals and all mode cursors. Collections, watch later and history are kept.
+
 ## Where your data lives
 
 - **Stars and follows** go straight to your GitHub account.
-- **Collections, watch later, history, feedback, following weights and reading signals** have no public GitHub API, so they're kept in local storage per GitHub user. The web and desktop apps keep separate copies.
+- **Collections, watch later, history, feedback, following weights, reading signals, recommendation mode and pagination progress** have no public GitHub API, so they're kept in local storage per GitHub user. The web and desktop apps keep separate copies.
 - **Your token** stays in local storage and is removed when you sign out.
 
 ## Project layout
@@ -130,6 +135,8 @@ src/
 src-tauri/             desktop app (Tauri); the Rust side sends the GitHub sign-in requests
 .github/workflows/     web and desktop publishing
 ```
+
+A technical graph is proposed in [Issue #3](https://github.com/Andy7016/Gitube/issues/3) and remains under discussion.
 
 ## License
 

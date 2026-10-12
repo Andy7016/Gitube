@@ -5,7 +5,8 @@ import { useApiMeta } from '../api/github'
 import { Avatar } from '../components/Avatar'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { InterestPicker } from '../components/InterestPicker'
-import { buildProfile, getEngine, topTopics } from '../lib/recommend'
+import { RecommendationModePicker } from '../components/RecommendationModePicker'
+import { buildProfile, resetEngines, topTopics } from '../lib/recommend'
 import { getTheme, setTheme, type Theme } from '../lib/theme'
 import { useAuth } from '../store/auth'
 import { useFeed } from '../store/feed'
@@ -81,13 +82,10 @@ function Interests() {
   return (
     <section className="panel" id="interests" aria-labelledby="interests-title">
       <h2 id="interests-title">兴趣方向</h2>
-      <p className="panel__lead">选中的方向会出现在首页频道栏，也会让推荐更偏向这些内容。</p>
+      <p className="panel__lead">选中的方向会出现在首页频道栏，也会让推荐更偏向这些内容。修改会用于后续分页或换批，当前已加载的列表会保留。</p>
       <InterestPicker
         selected={interests}
-        onChange={(ids) => {
-          setInterests(ids)
-          useFeed.getState().clearChannel('foryou')
-        }}
+        onChange={setInterests}
       />
     </section>
   )
@@ -240,14 +238,14 @@ function Blocked() {
         confirmText="确认重置？再点一次"
         onConfirm={() => {
           resetRecommendations()
-          if (login) getEngine(login).reset()
+          if (login) resetEngines(login)
           useFeed.getState().resetAll()
           toast('推荐记录已重置，回首页看看新的推荐')
         }}
       >
         重置推荐记录
       </ConfirmButton>
-      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐过的记录、在本应用里的操作偏好和有效阅读学习记录；收藏夹、稍后再看和历史记录不受影响。</p>
+      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐记录、操作偏好、有效阅读学习记录、关注者权重和所有模式的分页进度，并恢复正常推荐；收藏夹、稍后再看和历史记录不受影响。</p>
     </section>
   )
 }
@@ -294,6 +292,11 @@ export function SettingsPage() {
       <h1 className="page-title">偏好设置</h1>
       <Account />
       <Interests />
+      <section className="panel" aria-labelledby="mode-title">
+        <h2 id="mode-title">推荐模式</h2>
+        <RecommendationModePicker />
+        <p className="panel__fine">与首页共用设置。每种模式会保留本次应用运行中的列表和浏览位置，切回时继续浏览。</p>
+      </section>
       <FollowingWeights />
       <ProfileView />
       <Blocked />
@@ -301,4 +304,3 @@ export function SettingsPage() {
     </div>
   )
 }
-

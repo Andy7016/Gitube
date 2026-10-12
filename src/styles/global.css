@@ -2241,6 +2241,34 @@ img {
   }
 }
 
+/* ---------- 推荐模式与关注者影响 ---------- */
+.recommendation-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.recommendation-mode__options {
+  flex-wrap: wrap;
+  border-radius: 18px;
+}
+.recommendation-mode__options .segmented__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.feed-tools--recommend {
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.feed-tools--recommend > .text-btn {
+  flex: none;
+  margin-top: 8px;
+}
+.feed-tools--recommend .panel__fine {
+  max-width: 700px;
+}
 .following-weights {
   display: flex;
   flex-direction: column;
@@ -2280,6 +2308,16 @@ img {
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 600px) {
+  .feed-tools--recommend {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .feed-tools--recommend > .text-btn {
+    margin: 0 0 0 auto;
+  }
+  .recommendation-mode__options .segmented__item {
+    padding: 0 11px;
+  }
   .following-weight {
     grid-template-columns: 32px minmax(0, 1fr) 50px;
     gap: 8px 12px;

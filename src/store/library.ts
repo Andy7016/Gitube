@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Repo } from '../api/types'
+import { hasTasteInterests, isRecommendationMode, type RecommendationMode } from '../lib/recommendationMode'
 
 /**
  * 「我的」数据：收藏夹、稍后再看、历史记录、推荐反馈。
@@ -38,6 +39,7 @@ export interface LibraryData {
   version: 1
   onboarded: boolean
   interests: string[]
+  recommendationMode: RecommendationMode
   /** 小写 GitHub login；省略时使用默认的 1 倍。 */
   followingWeights: Record<string, number>
   /** 小写 owner/repo；同账号同仓库 24 小时只计一次有效阅读。 */
@@ -59,6 +61,7 @@ const emptyData = (): LibraryData => ({
   version: 1,
   onboarded: false,
   interests: [],
+  recommendationMode: 'normal',
   followingWeights: {},
   dwellRecorded: {},
   folders: [{ id: DEFAULT_FOLDER_ID, name: '默认收藏夹', createdAt: Date.now(), items: [] }],
@@ -143,6 +146,8 @@ function loadData(login: string): LibraryData {
       )) as Record<string, number>
     }
     // 新增偏好逐项校验，非法字段不会影响既有收藏和浏览数据。
+    if (isRecommendationMode(parsed.recommendationMode)) data.recommendationMode = parsed.recommendationMode
+    if (data.recommendationMode === 'taste' && !hasTasteInterests(data.interests, data.blockedTopics)) data.recommendationMode = 'normal'
     if (isRecord(parsed.followingWeights)) {
       data.followingWeights = Object.fromEntries(Object.entries(parsed.followingWeights)
         .filter(([login, weight]) => validLogin(loginKey(login)) && isWeight(weight))
@@ -159,6 +164,7 @@ const pickData = (s: LibraryState): LibraryData => ({
   version: 1,
   onboarded: s.onboarded,
   interests: s.interests,
+  recommendationMode: s.recommendationMode,
   followingWeights: s.followingWeights,
   dwellRecorded: s.dwellRecorded,
   folders: s.folders,
@@ -178,6 +184,7 @@ interface LibraryState extends LibraryData {
   load: (login: string) => void
   completeOnboarding: (interests: string[]) => void
   setInterests: (interests: string[]) => void
+  setRecommendationMode: (mode: RecommendationMode) => void
   setFollowingWeight: (login: string, value: number) => void
   recordDwell: (repo: Repo, expectedLogin: string, expectedRevision: number) => boolean
 
@@ -229,7 +236,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
       set({ interests, onboarded: true })
     },
     setInterests(interests) {
-      set({ interests })
+      set({ interests, ...(get().recommendationMode === 'taste' && !hasTasteInterests(interests, get().blockedTopics) ? { recommendationMode: 'normal' as const } : {}) })
+    },
+    setRecommendationMode(mode) {
+      if (!isRecommendationMode(mode)) return
+      set({ recommendationMode: mode === 'taste' && !hasTasteInterests(get().interests, get().blockedTopics) ? 'normal' : mode })
     },
     setFollowingWeight(login, value) {
       const key = loginKey(login)
@@ -333,7 +344,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
         addEvent('dislike', repo)
       } else if (reason.type === 'topic') {
         const blockedTopics = [...new Set([...s.blockedTopics, reason.topic])]
-        set({ blockedTopics })
+        set({ blockedTopics, ...(s.recommendationMode === 'taste' && !hasTasteInterests(s.interests, blockedTopics) ? { recommendationMode: 'normal' as const } : {}) })
       } else {
         set({ blockedLangs: [...new Set([...s.blockedLangs, reason.lang])] })
       }
@@ -368,7 +379,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     resetRecommendations() {
-      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, dwellRecorded: {}, followingWeights: {}, recommendationRevision: get().recommendationRevision + 1 })
+      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, dwellRecorded: {}, followingWeights: {}, recommendationMode: 'normal', recommendationRevision: get().recommendationRevision + 1 })
     },
   }
 })
