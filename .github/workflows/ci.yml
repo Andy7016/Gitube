@@ -1,0 +1,31 @@
+# 自动检查：每个 Pull Request 都会跑一遍类型检查和网页版构建，没通过就别合并
+name: 检查构建
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 类型检查和构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查和构建
+        run: npm run build

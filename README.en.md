@@ -70,7 +70,9 @@ The app isn't signed with a paid Apple or Microsoft certificate, so the first la
 
 ## Development
 
-Requires Node.js 18 or later.
+Want to contribute? Start with [CONTRIBUTING.md](CONTRIBUTING.md) (in Chinese).
+
+Requires Node.js 20.19 or later (22 LTS recommended).
 
 ```bash
 npm install

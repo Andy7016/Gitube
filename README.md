@@ -69,7 +69,9 @@ Token 只保存在你自己的设备上，只用来直接请求 GitHub API。也
 
 ## 本地开发
 
-需要 Node.js 18 或更高版本。
+想参与开发？先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+需要 Node.js 20.19 或更高版本（推荐 22 LTS）。
 
 ```bash
 npm install
