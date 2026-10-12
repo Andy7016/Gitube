@@ -28,7 +28,8 @@ It is fully open source and has no server of its own: your token stays on your d
 
 ## Features
 
-- **A feed picked for you.** Recommendations come from what you've recently starred, your own repositories, the interests you choose, and what you do in the app (star, save, open, "not interested"). Every card says why it's there: "because you starred X", "@someone starred this", "new this week".
+- **A feed picked for you.** Recommendations come from what you've recently starred, your own repositories, the interests you choose, public stars from people you follow, and what you do in the app (star, save, open, "not interested"). Every card says why it's there: "because you starred X", "@someone starred this", "new this week".
+- **Following weights.** Adjust each sampled person's recommendation influence in Settings from 0 to 3, with a default of 1. A weight of 0 excludes their influence without unfollowing them on GitHub.
 - **Channels.** For you, Following (what people you follow just starred), New this week, Hot this month, plus one channel per interest (bioinformatics, LLMs, Rust…).
 - **One-click actions.**
   - The star on each card stars the repo on your real GitHub account.
@@ -97,18 +98,18 @@ Two workflows live in `.github/workflows/`:
 
 Everything runs on your device; see `src/lib/recommend.ts`.
 
-1. **Profile.** Weights for each topic and language, from your latest 100 stars (newer stars count more), your own repositories, your chosen interests (strongest signal), and in-app actions (star +2.5, save +2, watch later +1, open +0.6, not interested −3, with a 30-day half-life).
+1. **Profile.** Weights for each topic and language, from your latest 100 stars (newer stars count more), your own repositories, your chosen interests (strongest signal), sampled public stars from people you follow, and in-app actions (star +2.5, save +2, watch later +1, open +0.6, not interested −3, with a 30-day half-life).
 2. **Candidates.** A few topics are sampled by weight (each searched three ways: all-time top, recently active, new this year), plus "similar to something you starred", "new in your languages", "new this week" and "something different". All of them go out as **one** GraphQL request.
-3. **Filtering.** Drops anything already starred, marked not interested, in a hidden topic or language, or shown in the last 3 days.
+3. **Filtering.** Drops anything already starred, owned by you, marked not interested, in a hidden topic or language, or shown in the last 3 days.
 4. **Ranking.** 50% interest match + 25% popularity + 15% recent activity + a little randomness, then spread out so the same owner, language or source doesn't cluster.
-5. Projects starred by people you follow are mixed in.
+5. Projects starred by people you follow are mixed in, prioritized by the person's weight and how recently they starred the project.
 
-The "how Gitube sees you" section in Settings shows your current profile.
+The "how Gitube sees you" section in Settings shows your current profile. The following influence controls list only people whose star samples were actually retrieved: up to 50 people, with their 6 most recent public stars each. This does not cover all their interests. Contributions are normalized per person and decay with a 30-day half-life, so more samples do not automatically mean more influence. A weight of 0 leaves the original Following channel unchanged.
 
 ## Where your data lives
 
 - **Stars and follows** go straight to your GitHub account.
-- **Collections, watch later, history and feedback** have no public GitHub API, so they're kept in local storage per GitHub user. The web and desktop apps keep separate copies.
+- **Collections, watch later, history, feedback and following weights** have no public GitHub API, so they're kept in local storage per GitHub user. The web and desktop apps keep separate copies.
 - **Your token** stays in local storage and is removed when you sign out.
 
 ## Project layout

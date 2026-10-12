@@ -46,7 +46,18 @@ function bump(map: Map<string, number>, key: string, w: number) {
   map.set(key, (map.get(key) ?? 0) + w)
 }
 
-export function buildProfile(seeds: Seeds | null, lib: LibraryData): Profile {
+function followingWeight(lib: LibraryData, login: string): number {
+  const value = lib.followingWeights?.[login.toLowerCase()]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3 ? value : 1
+}
+
+function followingFreshness(starredAt: string, now: number): number {
+  const at = Date.parse(starredAt)
+  if (!Number.isFinite(at)) return 0
+  return Math.pow(0.5, Math.max(0, now - at) / 86_400_000 / HALF_LIFE_DAYS)
+}
+
+export function buildProfile(seeds: Seeds | null, lib: LibraryData, following: FollowingStar[] = []): Profile {
   const topicW = new Map<string, number>()
   const langW = new Map<string, number>()
   const interestTopicLabel = new Map<string, string>()
@@ -64,6 +75,28 @@ export function buildProfile(seeds: Seeds | null, lib: LibraryData): Profile {
     if (o.language) bump(langW, o.language, 0.6)
   }
 
+  // 每个人共享固定预算，去重后按其采样数归一；更多采样不会放大影响。
+  const people = new Map<string, Map<string, FollowingStar>>()
+  for (const item of following) {
+    const login = item.login.toLowerCase()
+    const repos = people.get(login) ?? new Map<string, FollowingStar>()
+    const name = item.repo.nameWithOwner.toLowerCase()
+    const prior = repos.get(name)
+    if (!prior || item.starredAt > prior.starredAt) repos.set(name, item)
+    people.set(login, repos)
+  }
+  const now = Date.now()
+  for (const [login, repos] of people) {
+    const multiplier = followingWeight(lib, login)
+    if (multiplier === 0) continue
+    for (const item of repos.values()) {
+      const weight = 1.2 * multiplier / repos.size * followingFreshness(item.starredAt, now)
+      const topics = [...new Set(item.repo.topics)].filter((topic) => !TOPIC_STOPLIST.has(topic))
+      for (const topic of topics) bump(topicW, topic, weight / topics.length)
+      if (item.repo.language) bump(langW, item.repo.language, weight * 0.5)
+    }
+  }
+
   // 主动选择的兴趣标签：权重最高
   for (const id of lib.interests) {
     const it = INTEREST_BY_ID.get(id)
@@ -75,7 +108,6 @@ export function buildProfile(seeds: Seeds | null, lib: LibraryData): Profile {
   }
 
   // 在本应用里的行为（Star、收藏、稍后再看、打开、不感兴趣）
-  const now = Date.now()
   for (const e of lib.events) {
     const decay = Math.pow(0.5, (now - e.at) / 86_400_000 / HALF_LIFE_DAYS)
     const w = EVENT_WEIGHT[e.kind] * decay
@@ -98,8 +130,8 @@ export function buildProfile(seeds: Seeds | null, lib: LibraryData): Profile {
     maxL: maxPos(langW),
     blockedTopics,
     blockedLangs,
-    disliked: new Set(lib.dislikedRepos),
-    starred: new Set(seeds?.starred.map((r) => r.nameWithOwner) ?? []),
+    disliked: new Set(lib.dislikedRepos.map((name) => name.toLowerCase())),
+    starred: new Set(seeds?.starred.map((r) => r.nameWithOwner.toLowerCase()) ?? []),
     recentStars: seeds?.starred.slice(0, 30) ?? [],
     interestTopicLabel,
   }
@@ -226,6 +258,20 @@ const BATCH_SIZE = 18
 const CURSOR_TTL = 3 * 24 * 3600_000
 const SEEN_TTL = 3 * 24 * 3600_000
 
+export interface RecommendationOptions {
+  searchMany?: typeof searchMany
+  random?: () => number
+}
+
+function shuffle<T>(items: readonly T[], random: () => number): T[] {
+  const result = [...items]
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    ;[result[i], result[j]] = [result[j], result[i]]
+  }
+  return result
+}
+
 export class RecommendEngine {
   private cursors: Record<string, Cursor> = {}
   private batch = 0
@@ -233,7 +279,12 @@ export class RecommendEngine {
   private recycled = false
   private readonly storageKey: string
 
-  constructor(login: string) {
+  private readonly search: typeof searchMany
+  private readonly random: () => number
+
+  constructor(private readonly login: string, options: RecommendationOptions = {}) {
+    this.search = options.searchMany ?? searchMany
+    this.random = options.random ?? Math.random
     this.storageKey = `gitube:cursors:${login.toLowerCase()}`
     try {
       const raw = JSON.parse(localStorage.getItem(this.storageKey) ?? '{}') as Record<string, Cursor>
@@ -326,14 +377,14 @@ export class RecommendEngine {
   }
 
   private passes(repo: Repo, p: Profile, ctx: EngineContext) {
-    const n = repo.nameWithOwner
-    if (repo.isArchived) return false
+    const n = repo.nameWithOwner.toLowerCase()
+    if (repo.isArchived || repo.owner.toLowerCase() === this.login.toLowerCase()) return false
     if (ctx.isStarred(repo) || p.starred.has(n)) return false
     if (p.disliked.has(n)) return false
     if (repo.language && p.blockedLangs.has(repo.language)) return false
     if (repo.topics.some((t) => p.blockedTopics.has(t))) return false
     if (this.sessionSeen.has(n)) return false
-    const seenAt = ctx.lib.seen[n]
+    const seenAt = ctx.lib.seen[n] ?? ctx.lib.seen[repo.nameWithOwner]
     if (seenAt && Date.now() - seenAt < SEEN_TTL) return false
     return true
   }
@@ -376,34 +427,47 @@ export class RecommendEngine {
   }
 
   private followingPicks(p: Profile, ctx: EngineContext, exclude: Set<string>): Candidate[] {
-    const byRepo = new Map<string, { repo: Repo; users: FollowingStar[] }>()
+    const byRepo = new Map<string, { repo: Repo; users: Map<string, FollowingStar>; weight: number }>()
+    const now = Date.now()
     for (const f of ctx.following) {
-      const n = f.repo.nameWithOwner
+      const multiplier = followingWeight(ctx.lib, f.login)
+      if (multiplier === 0 || followingFreshness(f.starredAt, now) === 0) continue
+      const n = f.repo.nameWithOwner.toLowerCase()
       if (exclude.has(n) || !this.passes(f.repo, p, ctx)) continue
-      const e = byRepo.get(n) ?? { repo: f.repo, users: [] }
-      e.users.push(f)
+      const e = byRepo.get(n) ?? { repo: f.repo, users: new Map<string, FollowingStar>(), weight: 0 }
+      const login = f.login.toLowerCase()
+      const prior = e.users.get(login)
+      if (prior && prior.starredAt >= f.starredAt) continue
+      if (prior) e.weight -= multiplier * followingFreshness(prior.starredAt, now)
+      e.users.set(login, f)
+      e.weight += multiplier * followingFreshness(f.starredAt, now)
       byRepo.set(n, e)
     }
-    return [...byRepo.values()].slice(0, 2).map(({ repo, users }) => ({
-      repo,
-      src: 'following',
-      score: 1,
-      reason: {
-        kind: 'following',
-        text: users.length > 1 ? `@${users[0].login} 等 ${users.length} 人 Star 了` : `@${users[0].login} Star 了`,
-        avatar: users[0].avatarUrl,
-      },
-    }))
+    return shuffle([...byRepo.values()], this.random)
+      .sort((a, b) => b.weight - a.weight).slice(0, 2).map(({ repo, users, weight }) => {
+        const people = [...users.values()].sort((a, b) => followingWeight(ctx.lib, b.login) * followingFreshness(b.starredAt, now)
+          - followingWeight(ctx.lib, a.login) * followingFreshness(a.starredAt, now))
+        return {
+          repo,
+          src: 'following',
+          score: weight,
+          reason: {
+            kind: 'following',
+            text: people.length > 1 ? `@${people[0].login} 等 ${people.length} 人 Star 了` : `@${people[0].login} Star 了`,
+            avatar: people[0].avatarUrl,
+          },
+        }
+      })
   }
 
   async next(ctx: EngineContext): Promise<FeedItem[]> {
-    const p = buildProfile(ctx.seeds, ctx.lib)
+    const p = buildProfile(ctx.seeds, ctx.lib, ctx.following)
     const cands = new Map<string, Candidate>()
 
     for (let round = 0; round < 3 && cands.size < BATCH_SIZE; round++) {
       const specs = this.pickSources(p, round)
       if (!specs.length) break
-      const pages = await searchMany(
+      const pages = await this.search(
         specs.map((s) => ({ query: s.query, after: this.cursors[s.key]?.after ?? null, first: 12 })),
       )
       pages.forEach((page, i) => {
@@ -411,7 +475,7 @@ export class RecommendEngine {
         if (!page) return
         this.cursors[spec.key] = { after: page.endCursor, done: !page.hasNextPage, at: Date.now() }
         for (const repo of page.repos) {
-          const n = repo.nameWithOwner
+          const n = repo.nameWithOwner.toLowerCase()
           const existing = cands.get(n)
           if (existing) {
             existing.score += 0.05 // 多个来源都召回了它，稍微加分
@@ -432,12 +496,12 @@ export class RecommendEngine {
     this.saveCursors()
 
     const ranked = this.diversify([...cands.values()], BATCH_SIZE)
-    const social = this.followingPicks(p, ctx, new Set(ranked.map((c) => c.repo.nameWithOwner)))
+    const social = this.followingPicks(p, ctx, new Set(ranked.map((c) => c.repo.nameWithOwner.toLowerCase())))
     // 把社交推荐插在第 3 和第 10 个位置附近
     social.forEach((s, i) => ranked.splice(Math.min(ranked.length, i === 0 ? 2 : 9), 0, s))
 
     this.batch++
-    for (const c of ranked) this.sessionSeen.add(c.repo.nameWithOwner)
+    for (const c of ranked) this.sessionSeen.add(c.repo.nameWithOwner.toLowerCase())
 
     return ranked.map((c) => ({ key: `${c.repo.nameWithOwner}#${this.batch}`, repo: c.repo, reason: c.reason }))
   }

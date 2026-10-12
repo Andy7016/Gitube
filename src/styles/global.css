@@ -2240,3 +2240,56 @@ img {
     transition-duration: 0.01ms !important;
   }
 }
+
+.following-weights {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+}
+.following-weight {
+  display: grid;
+  grid-template-columns: 32px minmax(100px, 1fr) minmax(90px, 180px) 50px;
+  align-items: center;
+  gap: 12px;
+}
+.following-weight__person {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+.following-weight__person strong {
+  overflow-wrap: anywhere;
+}
+.following-weight__person span {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.following-weight input {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--blue);
+}
+.following-weight output {
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .following-weight {
+    grid-template-columns: 32px minmax(0, 1fr) 50px;
+    gap: 8px 12px;
+  }
+  .following-weight input {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+  .following-weight output {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}

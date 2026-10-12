@@ -38,6 +38,8 @@ export interface LibraryData {
   version: 1
   onboarded: boolean
   interests: string[]
+  /** 小写 GitHub login；省略时使用默认的 1 倍。 */
+  followingWeights: Record<string, number>
   folders: Folder[]
   later: SavedItem[]
   history: SavedItem[]
@@ -55,6 +57,7 @@ const emptyData = (): LibraryData => ({
   version: 1,
   onboarded: false,
   interests: [],
+  followingWeights: {},
   folders: [{ id: DEFAULT_FOLDER_ID, name: '默认收藏夹', createdAt: Date.now(), items: [] }],
   later: [],
   history: [],
@@ -70,18 +73,61 @@ const SEEN_TTL = 3 * 24 * 3600_000
 const MAX_HISTORY = 300
 const MAX_EVENTS = 400
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
+const loginKey = (value: string) => value.trim().toLowerCase()
+const validLogin = (value: string) => /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(value)
+const isWeight = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3 && Number.isInteger(value * 4)
+const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+function savedItems(value: unknown): SavedItem[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is SavedItem => isRecord(item) && isRecord(item.repo) &&
+    typeof item.repo.nameWithOwner === 'string' && Array.isArray(item.repo.topics) &&
+    typeof item.at === 'number' && Number.isFinite(item.at))
+}
+
 function loadData(login: string): LibraryData {
   try {
     const raw = localStorage.getItem(storageKey(login))
     if (!raw) return emptyData()
-    const parsed = JSON.parse(raw) as LibraryData
-    const data = { ...emptyData(), ...parsed }
+    const parsed: unknown = JSON.parse(raw)
+    const data = emptyData()
+    if (!isRecord(parsed)) return data
+    data.onboarded = parsed.onboarded === true
+    for (const key of ['interests', 'dislikedRepos', 'blockedTopics', 'blockedLangs'] as const) data[key] = strings(parsed[key])
+    data.later = savedItems(parsed.later)
+    data.history = savedItems(parsed.history).slice(0, MAX_HISTORY)
+    if (Array.isArray(parsed.folders)) {
+      data.folders = parsed.folders.filter((folder): folder is Record<string, unknown> =>
+        isRecord(folder) && typeof folder.id === 'string' && typeof folder.name === 'string' &&
+        typeof folder.createdAt === 'number' && Number.isFinite(folder.createdAt),
+      ).map((folder) => ({ id: folder.id as string, name: folder.name as string, createdAt: folder.createdAt as number, items: savedItems(folder.items) }))
+    }
     if (!data.folders.some((f) => f.id === DEFAULT_FOLDER_ID)) {
       data.folders.unshift(emptyData().folders[0])
     }
-    // 清理过期的「已看过」记录
     const now = Date.now()
-    data.seen = Object.fromEntries(Object.entries(data.seen).filter(([, t]) => now - t < SEEN_TTL))
+    if (Array.isArray(parsed.events)) {
+      data.events = parsed.events.filter((event): event is FeedbackEvent => isRecord(event) &&
+        ['star', 'save', 'later', 'open', 'dislike'].includes(event.kind as string) &&
+        typeof event.at === 'number' && Number.isFinite(event.at) &&
+        Array.isArray(event.topics) && event.topics.every((topic) => typeof topic === 'string') &&
+        (event.lang === null || typeof event.lang === 'string'),
+      ).slice(0, MAX_EVENTS)
+    }
+    if (isRecord(parsed.seen)) {
+      data.seen = Object.fromEntries(Object.entries(parsed.seen).filter(([, at]) =>
+        typeof at === 'number' && Number.isFinite(at) && at <= now && now - at < SEEN_TTL,
+      )) as Record<string, number>
+    }
+    // 新增偏好逐项校验，非法字段不会影响既有收藏和浏览数据。
+    if (isRecord(parsed.followingWeights)) {
+      data.followingWeights = Object.fromEntries(Object.entries(parsed.followingWeights)
+        .filter(([login, weight]) => validLogin(loginKey(login)) && isWeight(weight))
+        .map(([login, weight]) => [loginKey(login), weight])) as Record<string, number>
+    }
     return data
   } catch {
     return emptyData()
@@ -92,6 +138,7 @@ const pickData = (s: LibraryState): LibraryData => ({
   version: 1,
   onboarded: s.onboarded,
   interests: s.interests,
+  followingWeights: s.followingWeights,
   folders: s.folders,
   later: s.later,
   history: s.history,
@@ -107,6 +154,7 @@ interface LibraryState extends LibraryData {
   load: (login: string) => void
   completeOnboarding: (interests: string[]) => void
   setInterests: (interests: string[]) => void
+  setFollowingWeight: (login: string, value: number) => void
 
   quickSave: (repo: Repo) => void
   setFolders: (repo: Repo, folderIds: string[]) => void
@@ -147,6 +195,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
 
     load(login) {
       if (get().login === login) return
+      flushPendingWrite(get().login)
       set({ ...loadData(login), login })
     },
 
@@ -155,6 +204,11 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
     setInterests(interests) {
       set({ interests })
+    },
+    setFollowingWeight(login, value) {
+      const key = loginKey(login)
+      if (!validLogin(key) || !isWeight(value)) return
+      set({ followingWeights: { ...get().followingWeights, [key]: value } })
     },
 
     quickSave(repo) {
@@ -238,7 +292,8 @@ export const useLibrary = create<LibraryState>((set, get) => {
         set({ dislikedRepos: [...new Set([repo.nameWithOwner, ...s.dislikedRepos])].slice(0, 2000) })
         addEvent('dislike', repo)
       } else if (reason.type === 'topic') {
-        set({ blockedTopics: [...new Set([...s.blockedTopics, reason.topic])] })
+        const blockedTopics = [...new Set([...s.blockedTopics, reason.topic])]
+        set({ blockedTopics })
       } else {
         set({ blockedLangs: [...new Set([...s.blockedLangs, reason.lang])] })
       }
@@ -273,24 +328,31 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     resetRecommendations() {
-      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {} })
+      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, followingWeights: {} })
     },
   }
 })
 
-/* 数据变化后写回 localStorage（合并 300ms 内的多次修改） */
-let timer: ReturnType<typeof setTimeout> | null = null
+/* 按账号保存当次快照，合并 300ms 内的多次修改；切换前先落盘旧账号。 */
+const pendingWrites = new Map<string, { serialized: string; timer: ReturnType<typeof setTimeout> }>()
+function flushPendingWrite(login: string | null) {
+  if (!login) return
+  const key = storageKey(login)
+  const pending = pendingWrites.get(key)
+  if (!pending) return
+  clearTimeout(pending.timer)
+  pendingWrites.delete(key)
+  try { localStorage.setItem(key, pending.serialized) } catch { /* 存储不可用时仍允许使用应用 */ }
+}
+
 useLibrary.subscribe((state) => {
   if (!state.login) return
-  if (timer) clearTimeout(timer)
+  const key = storageKey(state.login)
+  const pending = pendingWrites.get(key)
+  if (pending) clearTimeout(pending.timer)
+  const serialized = JSON.stringify(pickData(state))
   const login = state.login
-  timer = setTimeout(() => {
-    try {
-      localStorage.setItem(storageKey(login), JSON.stringify(pickData(useLibrary.getState())))
-    } catch {
-      /* 存储满了或不可用，忽略 */
-    }
-  }, 300)
+  pendingWrites.set(key, { serialized, timer: setTimeout(() => flushPendingWrite(login), 300) })
 })
 
 /* ---------- 便捷 selector ---------- */
