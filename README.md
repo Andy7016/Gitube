@@ -39,7 +39,11 @@
 - **封面**：项目设置了社交预览图就用那张图；没有的话自动生成一张——底色是主语言的颜色，右上角的格子越亮越密，说明项目最近越活跃。
 - 浅色 / 深色主题，手机浏览器也能用。
 
-## 第一次使用：用 Token 登录
+## 第一次使用：登录
+
+**桌面版**：点「使用 GitHub 账号登录」，Gitube 会显示一个验证码。点「复制验证码并打开 GitHub」，在浏览器里粘贴验证码、点 **Authorize**，回到 Gitube 就自动登录了，不用自己生成 Token。以后想取消，可以在 GitHub 的 Settings → Applications 里撤销授权。
+
+**网页版**（或者在桌面版里展开「用 Personal Access Token 登录」）：
 
 1. 点登录页上的链接，打开 GitHub 生成 Token 的页面（需要的权限已经勾好：`public_repo`、`read:user`、`user:follow`）
 2. Expiration 选一个有效期，拉到底点 **Generate token**
@@ -101,7 +105,7 @@ npm run desktop:build   # 在本机打包安装包，输出在 src-tauri/target/
 3. 把 `.env.example` 复制成 `.env`，填上 `VITE_GITHUB_CLIENT_ID` 和 `GITHUB_CLIENT_SECRET`
 4. 重新 `npm run dev`
 
-用授权码换 token 必须带 client secret，这一步由 `vite.config.ts` 里挂在开发服务器上的小接口完成，secret 不会打包进前端。网页版和桌面版没有服务器，所以只提供 Token 登录。
+用授权码换 token 必须带 client secret，这一步由 `vite.config.ts` 里挂在开发服务器上的小接口完成，secret 不会打包进前端。网页版没有服务器，所以只提供 Token 登录；桌面版用的设备码登录不需要 client secret，见上面「第一次使用」。
 
 ## 推荐是怎么算的
 
@@ -131,11 +135,12 @@ src/
   lib/interests.ts     兴趣标签 ↔ GitHub topic
   lib/cover.ts         自动生成封面
   lib/actions.ts       收藏、稍后再看、不感兴趣、一键三连
+  lib/deviceLogin.ts   桌面版的「使用 GitHub 账号登录」（GitHub 设备码登录）
   store/               状态（zustand）：登录、本地数据、Star 状态、信息流
   components/          卡片、封面、Star 按钮、菜单、收藏夹弹窗……
   pages/               登录、选兴趣、首页、详情、收藏夹、稍后再看、历史、我的 Star、搜索、设置
   styles/              全局样式、README 排版
-src-tauri/             桌面版（Tauri）：窗口配置、图标、Rust 入口
+src-tauri/             桌面版（Tauri）：窗口配置、图标、Rust 入口（代发 GitHub 登录请求）
 .github/workflows/     自动发布网页版和桌面版
 app-icon.png           图标原图；改了以后运行 npx tauri icon 重新生成各尺寸
 vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
@@ -146,6 +151,7 @@ vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
 - **一直加载 / 提示连不上 GitHub**：需要能访问 `api.github.com`。国内网络不稳定时可以开代理再试。
 - **提示接口次数用完**：GitHub GraphQL 每小时 5000 点，正常刷不会用完；设置页能看到剩余额度。
 - **Star 失败，提示权限不够**：Token 没勾 `public_repo`。重新生成一个再登录。
+- **桌面版「使用 GitHub 账号登录」提示连不上 GitHub**：登录请求会走系统的代理设置，检查网络或代理后再试；也可以先展开「用 Personal Access Token 登录」。
 - **头像、封面图显示不出来**：图片来自 `avatars.githubusercontent.com` 等域名，加载失败时会自动换成首字母头像和自动生成的封面。
 - **桌面版发布失败，提示 Resource not accessible by integration**：到仓库 Settings → Actions → General → Workflow permissions，选 Read and write permissions。
 

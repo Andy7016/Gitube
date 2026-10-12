@@ -1,6 +1,6 @@
 [package]
 name = "gitube"
-version = "0.1.0"
+version = "0.2.0"
 description = "Gitube：像刷 B 站 / YouTube 一样刷 GitHub 开源项目"
 authors = ["Andy7016"]
 license = "MIT"
@@ -22,3 +22,6 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 设备码登录时代发 GitHub 登录请求（网页不能跨域调用这两个接口）。
+# native-tls 用系统自带的证书和加密库；system-proxy 让请求走系统代理设置
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "form", "system-proxy"] }

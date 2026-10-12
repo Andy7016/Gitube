@@ -1,7 +1,7 @@
 {
   "name": "gitube",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Gitube：像刷 B 站 / YouTube 一样刷 GitHub 开源项目",
   "license": "MIT",
   "repository": {

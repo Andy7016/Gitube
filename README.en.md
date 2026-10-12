@@ -40,7 +40,11 @@ It is fully open source and has no server of its own: your token stays on your d
 - **Covers.** Projects with a custom social preview use it. Others get a generated cover: the background is the main language's color, and the brighter and denser the grid in the corner, the more active the project has been lately.
 - Light and dark themes; works in mobile browsers too.
 
-## Getting started: sign in with a token
+## Getting started: sign in
+
+**Desktop app:** click *使用 GitHub 账号登录* (Sign in with GitHub). Gitube shows a short code. Click the button below it to copy the code and open GitHub, paste the code in your browser and click **Authorize**. Gitube signs you in automatically, with no token to create. You can revoke access any time under GitHub *Settings → Applications*.
+
+**Web app** (or expand *用 Personal Access Token 登录* in the desktop app):
 
 1. Use the link on the sign-in page to open GitHub's "new token" page. The scopes are already ticked: `public_repo`, `read:user`, `user:follow`.
 2. Pick an expiration, scroll down and click **Generate token**.
@@ -115,10 +119,11 @@ src/
   lib/interests.ts     interest tags ↔ GitHub topics
   lib/cover.ts         generated covers
   lib/actions.ts       save, watch later, not interested, star + save + follow
+  lib/deviceLogin.ts   "Sign in with GitHub" in the desktop app (GitHub device flow)
   store/               state (zustand)
   components/          cards, covers, star button, menus, dialogs…
   pages/               sign-in, onboarding, home, project, library, search, settings
-src-tauri/             desktop app (Tauri)
+src-tauri/             desktop app (Tauri); the Rust side sends the GitHub sign-in requests
 .github/workflows/     web and desktop publishing
 ```
 
