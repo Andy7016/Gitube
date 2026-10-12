@@ -1,44 +1,39 @@
 {
-  "name": "repoflow",
-  "version": "0.1.0",
+  "name": "gitube",
   "private": true,
+  "version": "0.1.0",
+  "description": "Gitube：像刷 B 站 / YouTube 一样刷 GitHub 开源项目",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Andy7016/Gitube.git"
+  },
+  "homepage": "https://andy7016.github.io/Gitube/",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,web \"node --env-file-if-exists=.env --watch server/index.mjs --dev\" \"vite --config vite.gitube.config.ts --host 127.0.0.1\"",
-    "dev:repoflow": "concurrently -k -n api,web \"node --env-file-if-exists=.env --watch server/index.mjs --dev\" \"vite --host 127.0.0.1\"",
-    "build": "tsc -p gitube/tsconfig.json && vite build --config vite.gitube.config.ts",
-    "build:repoflow": "tsc -b && vite build",
-    "start": "node --env-file-if-exists=.env server/index.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "check": "npm run build && npm test"
-  },
-  "engines": {
-    "node": ">=22.12"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
-    "express": "^5.1.0",
-    "express-session": "^1.18.2",
+    "dompurify": "^3.4.16",
     "lucide-react": "^0.577.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-markdown": "^10.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "react-router": "^7.18.4",
-    "rehype-raw": "^7.0.0",
-    "rehype-sanitize": "^6.0.0",
-    "rehype-slug": "^6.0.0",
-    "remark-gfm": "^4.0.1",
-    "remark-parse": "^11.0.0",
-    "unified": "^11.0.5",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@types/node": "^22.18.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "concurrently": "^9.2.1",
+    "@tauri-apps/cli": "^2.11.5",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.2.0",
     "typescript": "~5.9.3",
-    "vite": "^7.1.0"
+    "vite": "^7.3.7"
   }
 }

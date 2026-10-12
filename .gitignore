@@ -1,19 +1,15 @@
+# 依赖和打包输出
 node_modules/
 dist/
-.env
-.env.*
-!.env.example
-*.log
-*.tsbuildinfo
-.artifacts/
-.local/
 
-# Independent experiments and local editor / OS files
-/oneshot-astra/
+# 本地配置（里面可能有 OAuth secret）
+.env
+.env.local
+!.env.example
+
+# 系统和编辑器
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-# Retained upstream desktop source is not part of the Web build
-src-tauri/target/
+*.log
