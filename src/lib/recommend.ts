@@ -38,6 +38,7 @@ const EVENT_WEIGHT: Record<EventKind, number> = {
   save: 2,
   later: 1,
   open: 0.6,
+  dwell: 0.3,
   dislike: -3,
 }
 const HALF_LIFE_DAYS = 30

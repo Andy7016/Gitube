@@ -247,7 +247,7 @@ function Blocked() {
       >
         重置推荐记录
       </ConfirmButton>
-      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐过的记录和在本应用里的操作偏好；收藏夹、稍后再看和历史记录不受影响。</p>
+      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐过的记录、在本应用里的操作偏好和有效阅读学习记录；收藏夹、稍后再看和历史记录不受影响。</p>
     </section>
   )
 }
@@ -301,3 +301,4 @@ export function SettingsPage() {
     </div>
   )
 }
+

@@ -20,7 +20,7 @@ export interface Folder {
   items: SavedItem[]
 }
 
-export type EventKind = 'star' | 'save' | 'later' | 'open' | 'dislike'
+export type EventKind = 'star' | 'save' | 'later' | 'open' | 'dislike' | 'dwell'
 
 export interface FeedbackEvent {
   kind: EventKind
@@ -40,6 +40,8 @@ export interface LibraryData {
   interests: string[]
   /** 小写 GitHub login；省略时使用默认的 1 倍。 */
   followingWeights: Record<string, number>
+  /** 小写 owner/repo；同账号同仓库 24 小时只计一次有效阅读。 */
+  dwellRecorded: Record<string, number>
   folders: Folder[]
   later: SavedItem[]
   history: SavedItem[]
@@ -58,6 +60,7 @@ const emptyData = (): LibraryData => ({
   onboarded: false,
   interests: [],
   followingWeights: {},
+  dwellRecorded: {},
   folders: [{ id: DEFAULT_FOLDER_ID, name: '默认收藏夹', createdAt: Date.now(), items: [] }],
   later: [],
   history: [],
@@ -72,6 +75,8 @@ const storageKey = (login: string) => `gitube:library:${login.toLowerCase()}`
 const SEEN_TTL = 3 * 24 * 3600_000
 const MAX_HISTORY = 300
 const MAX_EVENTS = 400
+const DWELL_TTL = 24 * 3600_000
+const MAX_DWELL_RECORDED = 1000
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
@@ -79,7 +84,22 @@ const loginKey = (value: string) => value.trim().toLowerCase()
 const validLogin = (value: string) => /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(value)
 const isWeight = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3 && Number.isInteger(value * 4)
+const repoKey = (value: string) => value.trim().toLowerCase()
+const validRepoKey = (value: string) => /^[^/\s]+\/[^/\s]+$/.test(value) && value.length <= 200
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+function recentDwell(value: unknown, now: number): Record<string, number> {
+  if (!isRecord(value)) return {}
+  // Normalize before deduplication so differently cased keys keep their latest timestamp.
+  const recent: Record<string, number> = {}
+  for (const [name, at] of Object.entries(value)) {
+    const key = repoKey(name)
+    if (validRepoKey(key) && typeof at === 'number' && Number.isFinite(at) && at >= 0 && at <= now && now - at < DWELL_TTL) {
+      recent[key] = Math.max(recent[key] ?? 0, at)
+    }
+  }
+  return Object.fromEntries(Object.entries(recent).sort((a, b) => b[1] - a[1]).slice(0, MAX_DWELL_RECORDED))
+}
 
 function savedItems(value: unknown): SavedItem[] {
   if (!Array.isArray(value)) return []
@@ -111,7 +131,7 @@ function loadData(login: string): LibraryData {
     const now = Date.now()
     if (Array.isArray(parsed.events)) {
       data.events = parsed.events.filter((event): event is FeedbackEvent => isRecord(event) &&
-        ['star', 'save', 'later', 'open', 'dislike'].includes(event.kind as string) &&
+        ['star', 'save', 'later', 'open', 'dislike', 'dwell'].includes(event.kind as string) &&
         typeof event.at === 'number' && Number.isFinite(event.at) &&
         Array.isArray(event.topics) && event.topics.every((topic) => typeof topic === 'string') &&
         (event.lang === null || typeof event.lang === 'string'),
@@ -128,6 +148,7 @@ function loadData(login: string): LibraryData {
         .filter(([login, weight]) => validLogin(loginKey(login)) && isWeight(weight))
         .map(([login, weight]) => [loginKey(login), weight])) as Record<string, number>
     }
+    data.dwellRecorded = recentDwell(parsed.dwellRecorded, now)
     return data
   } catch {
     return emptyData()
@@ -139,6 +160,7 @@ const pickData = (s: LibraryState): LibraryData => ({
   onboarded: s.onboarded,
   interests: s.interests,
   followingWeights: s.followingWeights,
+  dwellRecorded: s.dwellRecorded,
   folders: s.folders,
   later: s.later,
   history: s.history,
@@ -151,10 +173,13 @@ const pickData = (s: LibraryState): LibraryData => ({
 
 interface LibraryState extends LibraryData {
   login: string | null
+  /** 瞬态账号/重置边界；旧阅读计时和请求不能越过此边界提交。 */
+  recommendationRevision: number
   load: (login: string) => void
   completeOnboarding: (interests: string[]) => void
   setInterests: (interests: string[]) => void
   setFollowingWeight: (login: string, value: number) => void
+  recordDwell: (repo: Repo, expectedLogin: string, expectedRevision: number) => boolean
 
   quickSave: (repo: Repo) => void
   setFolders: (repo: Repo, folderIds: string[]) => void
@@ -192,11 +217,12 @@ export const useLibrary = create<LibraryState>((set, get) => {
   return {
     ...emptyData(),
     login: null,
+    recommendationRevision: 0,
 
     load(login) {
       if (get().login === login) return
       flushPendingWrite(get().login)
-      set({ ...loadData(login), login })
+      set({ ...loadData(login), login, recommendationRevision: get().recommendationRevision + 1 })
     },
 
     completeOnboarding(interests) {
@@ -209,6 +235,20 @@ export const useLibrary = create<LibraryState>((set, get) => {
       const key = loginKey(login)
       if (!validLogin(key) || !isWeight(value)) return
       set({ followingWeights: { ...get().followingWeights, [key]: value } })
+    },
+    recordDwell(repo, expectedLogin, expectedRevision) {
+      const state = get()
+      if (!state.login || loginKey(state.login) !== loginKey(expectedLogin) || state.recommendationRevision !== expectedRevision) return false
+      const key = repoKey(repo.nameWithOwner)
+      if (!validRepoKey(key)) return false
+      const now = Date.now()
+      const recent = recentDwell(state.dwellRecorded, now)
+      if (Object.hasOwn(recent, key)) return false
+      // 满额时暂停新信号，不驱逐仍有效的记录而造成同一天重复计权。
+      if (Object.keys(recent).length >= MAX_DWELL_RECORDED) return false
+      const event: FeedbackEvent = { kind: 'dwell', topics: [...repo.topics], lang: repo.language, at: now }
+      set({ dwellRecorded: { ...recent, [key]: now }, events: [event, ...state.events].slice(0, MAX_EVENTS) })
+      return true
     },
 
     quickSave(repo) {
@@ -328,7 +368,7 @@ export const useLibrary = create<LibraryState>((set, get) => {
     },
 
     resetRecommendations() {
-      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, followingWeights: {} })
+      set({ events: [], dislikedRepos: [], blockedTopics: [], blockedLangs: [], seen: {}, dwellRecorded: {}, followingWeights: {}, recommendationRevision: get().recommendationRevision + 1 })
     },
   }
 })
