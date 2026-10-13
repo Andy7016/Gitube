@@ -12,6 +12,7 @@ import { RepoPage } from './pages/RepoPage'
 import { HistoryPage, LaterPage, SavedPage, StarsPage } from './pages/LibraryPages'
 import { SearchPage } from './pages/SearchPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { GraphPage } from './pages/GraphPage'
 
 /** 没登录跳登录页；第一次登录先选兴趣 */
 function RequireAuth({ onboarding = false }: { onboarding?: boolean }) {
@@ -56,6 +57,8 @@ export function App() {
           <Route element={<Layout />}>
             <Route index element={<HomePage />} />
             <Route path="/repo/:owner/:name" element={<RepoPage />} />
+            <Route path="/graph" element={<GraphPage />} />
+            <Route path="/graph/:owner/:name" element={<GraphPage />} />
             <Route path="/later" element={<LaterPage />} />
             <Route path="/saved" element={<SavedPage />} />
             <Route path="/saved/:folderId" element={<SavedPage />} />

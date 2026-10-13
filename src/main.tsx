@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/bricolage-grotesque/wdth.css'
 import './styles/global.css'
 import './styles/markdown.css'
+import './styles/graph.css'
 import { App } from './App'
 import { applyTheme, getTheme } from './lib/theme'
 import { useAuth } from './store/auth'
@@ -11,6 +12,7 @@ import { useFeed } from './store/feed'
 import { useLibrary } from './store/library'
 import { useSeeds } from './store/seeds'
 import { useStars } from './store/stars'
+import { useGraph } from './store/graph'
 
 applyTheme(getTheme())
 
@@ -22,6 +24,7 @@ let activeAccount: string | null = null
 const syncLibrary = () => {
   const { viewer, token } = useAuth.getState()
   const account = viewer && token ? viewer.login.toLowerCase() : null
+  useGraph.getState().setScope(account, token)
   if (account !== activeAccount) {
     activeAccount = account
     // 账号边界使旧在途请求失效，避免画像、Star 覆盖层或列表串到新账号。

@@ -139,6 +139,8 @@ npm run desktop:build   # 在本机打包安装包，输出在 src-tauri/target/
 ```
 src/
   api/github.ts        GitHub GraphQL / REST 请求（搜索、Star、README……）
+  api/graph.ts         技术图谱的前端采集入口
+  lib/graph/           来源证据、技术关系与有界公开数据采集
   lib/recommend.ts     推荐引擎
   lib/channels.ts      首页频道
   lib/interests.ts     兴趣标签 ↔ GitHub topic
@@ -164,7 +166,15 @@ vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
 - **头像、封面图显示不出来**：图片来自 `avatars.githubusercontent.com` 等域名，加载失败时会自动换成首字母头像和自动生成的封面。
 - **桌面版发布失败，提示 Resource not accessible by integration**：到仓库 Settings → Actions → General → Workflow permissions，选 Read and write permissions。
 
-技术图谱的后续方案见 [Issue #3](https://github.com/Andy7016/Gitube/issues/3)，目前处于方案讨论阶段。
+## 技术来源图谱
+
+项目详情页会分析一层公开来源；导航中的「技术图谱」也可以直接输入 GitHub 仓库地址或 `owner/repo`。选中节点后可查看原文、来源文件行号和判断理由，手动展开下一层，或把节点作为新的根项目。平移、缩放和居中只改变视图，不会重新采集。
+
+图谱由浏览器或桌面版直接读取 GitHub 的公开 README、明确的 GitHub 依赖地址、贡献者、CODEOWNERS 和维护者线索生成。只有明确的上游或下游声明才显示「技术提供者 → 使用者」箭头；普通引用、致谢、人员关联和相似 topics 不等于技术传承。节点大小表达 topics 的交并比，相同语言只作为明确标注的候选线索；图中距离不代表相似度。
+
+每次分析最多 48 个请求、3 个并发、90 秒，验证至多 12 个直接来源，并抽样至多 2 位人员各 30 个公开自有项目。结果可能不完整，界面会显示限制与失败原因。展开由你手动触发，整个工作区上限为 120 个节点、5 层。当前会话最多保留 8 个根工作区，返回时恢复图、选择和视图；退出登录、切换账号或刷新应用后重新开始。重新分析失败会保留已有结果。
+
+不需要自建服务器，不爬取外部网站，不根据依赖包名猜测仓库。方案与实现取舍见 [Issue #3](https://github.com/Andy7016/Gitube/issues/3) 和 [ADR 0004](docs/adr/0004-frontend-provenance-graph.md)。
 
 ## 开源协议
 

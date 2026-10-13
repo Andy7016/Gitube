@@ -29,6 +29,7 @@ import { useRepoReading } from '../lib/useRepoReading'
 import { useIsLater, useIsSaved, useLibrary } from '../store/library'
 import { useStars, useStarState } from '../store/stars'
 import { useSaveDialog } from '../store/ui'
+import { GraphWorkspace } from '../components/graph/GraphWorkspace'
 
 function Related({ repo }: { repo: Repo }) {
   const [items, setItems] = useState<Repo[] | null>(null)
@@ -295,6 +296,7 @@ export function RepoPage() {
         </div>
         <p className="watch__tip">长按 Star 一键三连：Star + 收藏 + 关注作者</p>
         <InfoBox repo={repo} detail={detail?.nameWithOwner === repo.nameWithOwner ? detail : null} />
+        <GraphWorkspace key={nameWithOwner.toLowerCase()} root={nameWithOwner} mode="embedded" />
         <section className="watch__readme" aria-label="README">
           <Readme repo={repo} />
         </section>

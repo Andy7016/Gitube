@@ -124,6 +124,8 @@ Each mode has separate pagination progress while sharing recent-exposure and fee
 src/
   api/github.ts        GitHub GraphQL / REST calls
   lib/recommend.ts     recommendation engine
+  api/graph.ts         frontend provenance graph entry point
+  lib/graph/           evidence extraction, relationship semantics, bounded public-data collection
   lib/channels.ts      home-page channels
   lib/interests.ts     interest tags ↔ GitHub topics
   lib/cover.ts         generated covers
@@ -136,7 +138,15 @@ src-tauri/             desktop app (Tauri); the Rust side sends the GitHub sign-
 .github/workflows/     web and desktop publishing
 ```
 
-A technical graph is proposed in [Issue #3](https://github.com/Andy7016/Gitube/issues/3) and remains under discussion.
+## Technology provenance graph
+
+Project details analyze one level of public sources. The graph page also accepts a GitHub repository URL or `owner/repo`. Select a node to inspect its source text, file/line link, and classification reason; expand it manually or use it as a new root. Panning, zooming, and centering only change the view.
+
+The shared web/desktop frontend reads public README references, explicit GitHub dependency URLs, contributors, CODEOWNERS, and maintainer evidence directly from GitHub. Only explicit upstream/downstream statements produce provider-to-consumer arrows. References, acknowledgments, shared people, and similar topics do not establish technical ancestry. Node area represents topic Jaccard similarity; language-only matches are labeled separately, and graph distance does not represent similarity.
+
+Each analysis allows at most 48 requests, 3 concurrent requests, and 90 seconds, resolving up to 12 direct targets and sampling up to 2 people with 30 public owned repositories each. Limits and failures are shown with partial results. Manual expansion is capped at 120 nodes and depth 5 per workspace. Up to 8 root workspaces retain results, selection, and camera during the current session; returning restores them without another analysis. Logout, account changes, or an application reload start fresh. A failed refresh keeps the previous result.
+
+No custom server, external-site crawler, or package-name-to-repository guessing is involved. See [Issue #3](https://github.com/Andy7016/Gitube/issues/3) and [ADR 0004](docs/adr/0004-frontend-provenance-graph.md) for the proposal and implementation decisions.
 
 ## License
 
