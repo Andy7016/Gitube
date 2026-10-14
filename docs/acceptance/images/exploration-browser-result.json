@@ -1,0 +1,14 @@
+{
+  "fixtureOnly": true,
+  "stage": "exploration",
+  "checks": [
+    "following slider and account-local persistence",
+    "light and dark settings screenshots",
+    "390px settings layout has no horizontal overflow",
+    "mode round trip preserves order and scroll without another search",
+    "home light, dark and 390px screenshots",
+    "detail return restores cached feed without another search",
+    "restored bottom sentinel waits for a real wheel event before paging",
+    "mounted detail hook honors strict outbound threshold and deduplicates"
+  ]
+}

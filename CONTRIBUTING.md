@@ -33,7 +33,8 @@ README 的「项目结构」有完整目录，最常改的是这几处：
 
 | 文件 | 作用 |
 | --- | --- |
-| `src/api/github.ts` | 所有 GitHub 请求（GraphQL 和 REST） |
+| `src/api/github.ts` | 推荐、搜索、账号操作与 README 的 GitHub 请求（GraphQL 和 REST） |
+| `src/api/graph.ts`、`src/lib/graph/` | 图谱入口、有界 GitHub 采集、来源证据解析与关系语义 |
 | `src/lib/recommend.ts` | 推荐引擎：画像 → 召回 → 过滤 → 打分 → 打散 |
 | `src/lib/actions.ts` | 收藏、稍后再看、不感兴趣、一键三连 |
 | `src/store/` | 状态（zustand）；本地数据存在 localStorage，键名以 `gitube:` 开头 |

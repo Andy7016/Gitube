@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { MouseEventHandler } from 'react'
 import { Link, useParams } from 'react-router'
 import {
   Bookmark,
@@ -24,9 +25,11 @@ import { StarButton } from '../components/StarButton'
 import { copyClone, quickSave, toggleLater } from '../lib/actions'
 import { formatCount, isoDaysAgo, timeAgo } from '../lib/format'
 import { TOPIC_STOPLIST } from '../lib/interests'
+import { useRepoReading } from '../lib/useRepoReading'
 import { useIsLater, useIsSaved, useLibrary } from '../store/library'
 import { useStars, useStarState } from '../store/stars'
 import { useSaveDialog } from '../store/ui'
+import { GraphWorkspace } from '../components/graph/GraphWorkspace'
 
 function Related({ repo }: { repo: Repo }) {
   const [items, setItems] = useState<Repo[] | null>(null)
@@ -83,7 +86,7 @@ function Related({ repo }: { repo: Repo }) {
   )
 }
 
-function ActionBar({ repo }: { repo: Repo }) {
+function ActionBar({ repo, onOpenOriginal }: { repo: Repo; onOpenOriginal: MouseEventHandler<HTMLAnchorElement> }) {
   const saved = useIsSaved(repo.nameWithOwner)
   const later = useIsLater(repo.nameWithOwner)
   const [copied, setCopied] = useState(false)
@@ -123,7 +126,7 @@ function ActionBar({ repo }: { repo: Repo }) {
         {copied ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
         clone
       </button>
-      <a className="pill" href={repo.url} target="_blank" rel="noreferrer">
+      <a className="pill" href={repo.url} target="_blank" rel="noreferrer" onClick={onOpenOriginal} onAuxClick={onOpenOriginal}>
         <ExternalLink size={18} aria-hidden="true" />
         GitHub
       </a>
@@ -200,7 +203,9 @@ export function RepoPage() {
   const [detail, setDetail] = useState<RepoDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const cached = repoCache.get(nameWithOwner) ?? null
-  const repo: Repo | null = detail ?? cached
+  // 路由切换后的首帧仍可能保留上个详情结果，不能展示或计时为新仓库。
+  const repo: Repo | null = detail?.nameWithOwner.toLowerCase() === nameWithOwner.toLowerCase() ? detail : cached
+  const onOpenOriginal = useRepoReading(repo, nameWithOwner)
 
   useEffect(() => {
     let alive = true
@@ -287,10 +292,11 @@ export function RepoPage() {
             </a>
             <span>{repo.ownerType === 'Organization' ? '组织' : '个人开发者'}</span>
           </div>
-          <ActionBar repo={repo} />
+          <ActionBar repo={repo} onOpenOriginal={onOpenOriginal} />
         </div>
         <p className="watch__tip">长按 Star 一键三连：Star + 收藏 + 关注作者</p>
-        <InfoBox repo={repo} detail={detail} />
+        <InfoBox repo={repo} detail={detail?.nameWithOwner === repo.nameWithOwner ? detail : null} />
+        <GraphWorkspace key={nameWithOwner.toLowerCase()} root={nameWithOwner} mode="embedded" />
         <section className="watch__readme" aria-label="README">
           <Readme repo={repo} />
         </section>

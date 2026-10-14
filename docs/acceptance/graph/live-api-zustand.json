@@ -1,0 +1,57 @@
+{
+  "startedAt": "2026-10-13T10:12:12.869Z",
+  "finishedAt": "2026-10-13T10:12:23.670Z",
+  "root": "pmndrs/zustand",
+  "status": "passed",
+  "scope": "Read-only public GitHub API collection in Node using the same frontend engine; not browser login or native installer testing.",
+  "counts": {
+    "referencesFound": 5,
+    "referencesResolved": 5,
+    "peopleFound": 28,
+    "peopleScanned": 1,
+    "candidatesScanned": 30,
+    "requests": 21
+  },
+  "limits": {
+    "references": 12,
+    "people": 2,
+    "reposPerPerson": 30,
+    "requests": 48,
+    "concurrency": 3,
+    "requestTimeoutMs": 20000,
+    "totalTimeoutMs": 90000
+  },
+  "nodes": [
+    {
+      "id": "pmndrs/zustand",
+      "tier": 0
+    },
+    {
+      "id": "immerjs/immer",
+      "tier": 1
+    },
+    {
+      "id": "zalmoxisus/redux-devtools-extension",
+      "tier": 1
+    },
+    {
+      "id": "react/react",
+      "tier": 1
+    },
+    {
+      "id": "reactjs/rfcs",
+      "tier": 1
+    },
+    {
+      "id": "bvaughn/rfcs",
+      "tier": 1
+    }
+  ],
+  "edgeCount": 5,
+  "peopleCount": 28,
+  "warnings": [
+    "保留 28 位人员线索，本次仅扫描前 2 位的公开自有仓库，每人最多 30 个。",
+    "dai-shi 的仓库：连不上 GitHub，请检查网络或代理后重试。",
+    "未取得 dai-shi 的公开自有仓库列表。"
+  ]
+}
