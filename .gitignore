@@ -2,10 +2,9 @@
 node_modules/
 dist/
 
-# 本地配置（里面可能有 OAuth secret）
+# 本地配置
 .env
 .env.local
-!.env.example
 
 # 系统和编辑器
 .DS_Store
