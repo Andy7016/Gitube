@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router'
-import { ExternalLink, Github, KeyRound } from 'lucide-react'
+import { ExternalLink, KeyRound } from 'lucide-react'
 import type { Repo } from '../api/types'
 import { GeneratedCover } from '../components/Cover'
 import { DeviceLogin } from '../components/DeviceLogin'
@@ -13,13 +13,6 @@ export const IS_DESKTOP = typeof window !== 'undefined' && '__TAURI_INTERNALS__'
 
 /** 桌面版可以「使用 GitHub 账号登录」（设备码登录，见 lib/deviceLogin.ts） */
 export const DEVICE_LOGIN = IS_DESKTOP && !!DEVICE_CLIENT_ID
-
-/** OAuth 登录需要 Vite 服务器换 token，只在本地开发时可用；网页版用 Token 登录 */
-export const OAUTH_CLIENT_ID = IS_DESKTOP
-  ? undefined
-  : (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined)
-export const OAUTH_STATE_KEY = 'gitube:oauth-state'
-export const OAUTH_SCOPES = 'read:user public_repo user:follow'
 
 const TOKEN_URL =
   'https://github.com/settings/tokens/new?description=Gitube&scopes=public_repo,read:user,user:follow'
@@ -101,24 +94,6 @@ function CoverWall() {
   )
 }
 
-/** OAuth 授权完成后跳回的地址：应用首页（不带 # 后面的部分） */
-export function oauthRedirectUri() {
-  return `${window.location.origin}${window.location.pathname}`
-}
-
-export function startOAuth() {
-  const state = crypto.randomUUID()
-  sessionStorage.setItem(OAUTH_STATE_KEY, state)
-  const params = new URLSearchParams({
-    client_id: OAUTH_CLIENT_ID!,
-    redirect_uri: oauthRedirectUri(),
-    scope: OAUTH_SCOPES,
-    state,
-    allow_signup: 'true',
-  })
-  location.href = `https://github.com/login/oauth/authorize?${params}`
-}
-
 export function LoginPage() {
   const token = useAuth((s) => s.token)
   const notice = useAuth((s) => s.notice)
@@ -165,7 +140,7 @@ export function LoginPage() {
             aria-invalid={!!error}
             aria-describedby={error ? 'token-error' : 'token-help'}
           />
-          <button type="submit" className={`btn ${OAUTH_CLIENT_ID || DEVICE_LOGIN ? '' : 'btn--primary'}`} disabled={busy || !value.trim()}>
+          <button type="submit" className={`btn ${DEVICE_LOGIN ? '' : 'btn--primary'}`} disabled={busy || !value.trim()}>
             {busy ? '验证中…' : '登录'}
           </button>
         </div>
@@ -204,15 +179,6 @@ export function LoginPage() {
           <p className="login__notice" role="alert">
             {notice}
           </p>
-        )}
-
-        {OAUTH_CLIENT_ID && (
-          <>
-            <button type="button" className="btn btn--primary btn--block btn--lg" onClick={startOAuth}>
-              <Github size={20} aria-hidden="true" /> 使用 GitHub 账号登录
-            </button>
-            <p className="login__or">或者用 Token 登录</p>
-          </>
         )}
 
         {DEVICE_LOGIN && <DeviceLogin />}
