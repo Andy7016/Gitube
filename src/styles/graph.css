@@ -11,6 +11,7 @@
 .graph-intro p { max-width: 570px; }
 .graph-workspace { min-width: 0; overflow: hidden; border: 1px solid var(--line); background: var(--surface); border-radius: 14px; }
 .graph-workspace--embedded { margin: 24px 0; }
+.graph-launch { margin: 16px 0; }
 .graph-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 17px 20px; border-bottom: 1px solid var(--line); }
 .graph-heading h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; }
 .graph-heading p { margin-top: 4px; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }

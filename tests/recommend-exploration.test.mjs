@@ -47,6 +47,7 @@ test('random candidate order and retrieval ignore learned profile, dwell, and fo
     events: Array.from({ length: 20 }, () => ({ kind: 'dwell', topics: ['database'], lang: 'TypeScript', at: Date.now() })) }) }))
   assert.deepEqual(a.map((item) => item.repo.id), b.map((item) => item.repo.id))
   assert.deepEqual(callsA, callsB)
+  assert.ok(callsA.flat().every((spec) => Number(spec.query.match(/stars:(?:>=)?(\d+)/)?.[1]) >= 21))
   assert.ok(callsA.flat().every((spec) => !spec.query.includes('topic:') && spec.query.includes('created:') && spec.query.includes('stars:') && spec.query.includes('sort:')))
   assert.ok(b.every((item) => item.reason.kind === 'explore' && item.repo.name !== 'social-only'))
   const taste = new RecommendEngine('taste-social', 'taste', { random: seededRandom(), searchMany: candidateSearch(pool) })

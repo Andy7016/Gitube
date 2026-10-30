@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { ExternalLink, GitBranch, RefreshCw, X } from 'lucide-react'
 import type { GraphEdge, GraphEvidence, GraphPerson } from '../../api/graph'
@@ -17,6 +17,15 @@ function EvidenceList({ evidence }: { evidence: GraphEvidence[] }) {
     {item.excerpt && <blockquote>{item.excerpt}</blockquote>}
     <p className="muted">{item.relationReason}</p>
   </li>)}</ul>
+}
+
+/** 详情页明确点击后才挂载会采集数据的工作区。 */
+export function DetailGraph({ root }: { root: string }) {
+  const scopeVersion = useGraph(s => s.scopeVersion)
+  const requestKey = `${scopeVersion}:${root.toLowerCase()}`
+  const [requested, setRequested] = useState<string | null>(null)
+  if (requested === requestKey) return <GraphWorkspace root={root} mode="embedded" />
+  return <div className="graph-launch"><button type="button" className="graph-button" onClick={() => setRequested(requestKey)}><GitBranch size={16} aria-hidden="true" />分析技术来源</button></div>
 }
 
 export function GraphWorkspace({ root, mode = 'standalone' }: { root?: string; mode?: GraphMode }) {

@@ -8,7 +8,7 @@ const moduleName = process.env.GITUBE_PLAYWRIGHT_MODULE
 const { chromium } = await import(moduleName ? pathToFileURL(moduleName).href : 'playwright')
 const baseURL = process.env.GITUBE_TEST_URL ?? 'http://127.0.0.1:5173'
 const stage = process.env.GITUBE_TEST_STAGE ?? 'exploration'
-const output = process.env.GITUBE_SCREENSHOTS ?? 'docs/acceptance/images'
+const output = process.env.GITUBE_SCREENSHOTS ?? '.scratch/acceptance/images'
 await mkdir(output, { recursive: true })
 const browser = await chromium.launch({ headless: true, channel: 'chrome' })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })

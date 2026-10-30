@@ -297,7 +297,7 @@ function shuffle<T>(items: readonly T[], random: () => number): T[] {
 }
 
 // 有界公开检索抽样，只承诺在返回的真实候选池中随机选择。
-const STAR_BANDS = ['0..20', '21..99', '100..499', '500..1999', '2000..9999', '>=10000']
+const STAR_BANDS = ['21..99', '100..499', '500..1999', '2000..9999', '>=10000']
 const SEARCH_SORTS = ['stars-asc', 'stars-desc', 'forks-asc', 'forks-desc', 'updated-asc', 'updated-desc']
 
 function randomSource(random: () => number, slot: number, batch: number, round: number,

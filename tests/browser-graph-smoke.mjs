@@ -13,7 +13,7 @@ baseURL.hash = ''
 baseURL.search = ''
 if (!baseURL.pathname.endsWith('/')) baseURL.pathname += '/'
 const stage = process.env.GITUBE_TEST_STAGE ?? 'local-dev'
-const output = resolve(process.env.GITUBE_SCREENSHOTS ?? `docs/acceptance/graph/${stage}`)
+const output = resolve(process.env.GITUBE_SCREENSHOTS ?? `.scratch/acceptance/graph/${stage}`)
 const expectedSourceSha = process.env.GITUBE_EXPECTED_SOURCE_SHA?.trim()
 await mkdir(output, { recursive: true })
 const result = {
@@ -397,6 +397,21 @@ try {
 
   await goHash('/repo/fixture-labs/detail-root')
   await page.locator('.watch__title').waitFor()
+  await page.getByRole('region', { name: 'README', exact: true }).waitFor()
+  await sleep(300)
+  assert.equal(await graph().count(), 0)
+  assert.ok(!result.requests.some((r) => r.path.startsWith('/repos/fixture-labs/detail-root') && !r.path.endsWith('/readme')))
+  await screenshot('detail-before-analysis-dark')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  await screenshot('detail-before-analysis-light')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '分析技术来源', exact: true }).scrollIntoViewIfNeeded()
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await screenshot('detail-before-analysis-mobile')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  check('repository detail shows a compact button without graph collection until clicked')
+  await page.getByRole('button', { name: '分析技术来源', exact: true }).click()
   await ready('fixture-labs/detail-root')
   assert.deepEqual(await nodeIDs(), ['fixture-labs/detail-child', 'fixture-labs/detail-root'])
   assert.ok(!result.requests.some((r) => r.path === '/repos/fixture-labs/detail-child/readme'))
@@ -404,7 +419,7 @@ try {
   assert.ok(detailHeight <= 1200, `Embedded graph unexpectedly large: ${detailHeight}px`)
   await graph().scrollIntoViewIfNeeded()
   await screenshot('detail-graph-dark')
-  check('repository detail automatically analyzes one level and embeds a bounded graph', { embeddedHeight: detailHeight, nodes: await nodeIDs() })
+  check('repository detail analyzes one level on demand and embeds a bounded graph', { embeddedHeight: detailHeight, nodes: await nodeIDs() })
 
   await page.getByRole('link', { name: '首页', exact: true }).first().click()
   const waitForFeed = async (mode) => page.waitForFunction((mode) => {
@@ -433,8 +448,8 @@ try {
   await page.locator('.card__title a').first().dispatchEvent('click', { button: 0 })
   await page.locator('.watch__title').waitFor()
   await page.locator('.watch__readme h1').waitFor()
-  const detailGraphRoot = await graph().getAttribute('data-graph-root')
-  await ready(detailGraphRoot)
+  assert.equal(await graph().count(), 0)
+  await page.getByRole('button', { name: '分析技术来源', exact: true }).waitFor()
   const searchesAfterDetail = result.counters.searches
   const restAfterDetail = requestCount()
   await page.goBack()

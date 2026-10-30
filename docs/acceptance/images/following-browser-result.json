@@ -1,9 +1,0 @@
-{
-  "fixtureOnly": true,
-  "stage": "following",
-  "checks": [
-    "following slider and account-local persistence",
-    "light and dark settings screenshots",
-    "390px settings layout has no horizontal overflow"
-  ]
-}

@@ -52,8 +52,10 @@ export function HomePage() {
   const [params, setParams] = useSearchParams()
   const active = params.get('c') ?? 'foryou'
   const login = useAuth((s) => s.viewer?.login ?? '')
-  const lib = useLibrary()
-  const mode = lib.recommendationMode
+  const mode = useLibrary((s) => s.recommendationMode)
+  const dislikedRepos = useLibrary((s) => s.dislikedRepos)
+  const blockedTopics = useLibrary((s) => s.blockedTopics)
+  const blockedLangs = useLibrary((s) => s.blockedLangs)
   const key = feedKey(login, active, mode)
   const feed = useFeed((s) => s.channels[key])
   const dismissed = useFeed((s) => s.dismissed)
@@ -93,7 +95,7 @@ export function HomePage() {
     setParams(id === 'foryou' ? {} : { c: id })
   }
 
-  const items = visibleFeedItems(feed?.items ?? [], lib, isStarredNow, active === 'foryou' ? dismissed : {})
+  const items = visibleFeedItems(feed?.items ?? [], { dislikedRepos, blockedTopics, blockedLangs }, isStarredNow, active === 'foryou' ? dismissed : {})
   const status = feedDisplayStatus(feed, items.length)
   const filteredBatch = !!feed?.items.length && !items.length
 

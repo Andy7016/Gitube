@@ -121,3 +121,118 @@ test('recommendation reset preserves favorites, later, history and manually sele
     assert.deepEqual(state.events, [])
   }, { 'gitube:library:existing': JSON.stringify(oldData()) })
 })
+
+test('legacy collections missing repo metadata survive loading, saving and reloading', () => {
+  withLibrary((actions, values, flush) => {
+    actions.load('LegacyMetadata')
+    const collections = state => [state.folders[0].items, state.later, state.history]
+    const snapshot = collections(useLibrary.getState())
+    assert.deepEqual(snapshot.map(items => items.map(item => item.repo.nameWithOwner)), [
+      ['Owner/Saved'], ['Owner/Later'], ['Owner/History'],
+    ])
+    assert.equal(useLibrary.getState().folders[0].createdAt, 0)
+    for (const [item] of snapshot) {
+      assert.deepEqual(item.repo.topics, [])
+      assert.equal(item.repo.owner, 'Owner')
+      assert.equal(item.repo.name, item.repo.nameWithOwner.split('/')[1])
+      assert.equal(item.repo.url, `https://github.com/${item.repo.nameWithOwner}`)
+      assert.equal(item.repo.stars, 0)
+      assert.equal(item.repo.forks, 0)
+      assert.equal(item.repo.language, null)
+      assert.equal(item.repo.description, null)
+      assert.equal(item.repo.coverImage, null)
+      assert.equal(item.repo.ownerType, 'User')
+      assert.equal(item.repo.viewerHasStarred, false)
+      assert.equal(item.at, 0)
+    }
+    actions.setFollowingWeight('alice', 2)
+    flush()
+    const saved = JSON.parse(values.get('gitube:library:legacymetadata'))
+    assert.deepEqual(collections(saved), snapshot)
+    actions.load('Other')
+    actions.load('LegacyMetadata')
+    assert.deepEqual(collections(useLibrary.getState()), snapshot)
+    assert.equal(useLibrary.getState().followingWeights.alice, 2)
+  }, { 'gitube:library:legacymetadata': JSON.stringify({
+    version: 1,
+    folders: [{ id: 'default', name: 'Favorites', items: [{ repo: { nameWithOwner: 'Owner/Saved' } }] }],
+    later: [{ repo: { nameWithOwner: 'Owner/Later', topics: null }, at: 'old' }],
+    history: [{ repo: { nameWithOwner: 'Owner/History', topics: 'python' }, at: null }],
+  }) })
+})
+
+test('stored repo metadata is retained while malformed optional fields get safe defaults', () => {
+  const completeRepo = {
+    id: 'R_123', nameWithOwner: 'Org/Project', name: 'Project', owner: 'Org', ownerId: 'O_1',
+    ownerType: 'Organization', ownerAvatar: 'https://example.com/avatar.png', description: 'Saved description',
+    url: 'https://github.com/Org/Project', homepageUrl: 'https://example.com', stars: 12, forks: 3,
+    language: 'Python', languageColor: '#3572A5', topics: ['python'], pushedAt: '2026-10-01T00:00:00Z',
+    createdAt: '2020-01-01T00:00:00Z', viewerHasStarred: true, coverImage: 'https://example.com/cover.png',
+    isArchived: true, license: 'MIT', defaultBranch: 'main', legacyExtra: { preserved: true },
+  }
+  withLibrary((actions, values, flush) => {
+    actions.load('RepoMetadata')
+    const [complete, malformed] = useLibrary.getState().later
+    assert.deepEqual(complete, { repo: completeRepo, at: 123 })
+    assert.equal(malformed.repo.nameWithOwner, 'Owner/Partial')
+    assert.equal(malformed.repo.name, 'Partial')
+    assert.equal(malformed.repo.owner, 'Owner')
+    assert.equal(malformed.repo.id, '')
+    assert.equal(malformed.repo.ownerId, '')
+    assert.equal(malformed.repo.ownerType, 'User')
+    assert.equal(malformed.repo.ownerAvatar, '')
+    assert.equal(malformed.repo.description, null)
+    assert.equal(malformed.repo.url, 'https://github.com/Owner/Partial')
+    assert.equal(malformed.repo.homepageUrl, null)
+    assert.equal(malformed.repo.stars, 0)
+    assert.equal(malformed.repo.forks, 0)
+    assert.equal(malformed.repo.language, null)
+    assert.equal(malformed.repo.languageColor, null)
+    assert.deepEqual(malformed.repo.topics, ['python'])
+    assert.equal(malformed.repo.pushedAt, null)
+    assert.equal(malformed.repo.createdAt, '1970-01-01T00:00:00.000Z')
+    assert.equal(malformed.repo.viewerHasStarred, false)
+    assert.equal(malformed.repo.coverImage, null)
+    assert.equal(malformed.repo.isArchived, false)
+    assert.equal(malformed.repo.license, null)
+    assert.equal(malformed.repo.defaultBranch, null)
+    assert.equal(malformed.at, 0)
+    flush()
+    actions.load('OtherMetadata')
+    actions.load('RepoMetadata')
+    assert.deepEqual(useLibrary.getState().later, [complete, malformed])
+    assert.deepEqual(JSON.parse(values.get('gitube:library:repometadata')).later, [complete, malformed])
+  }, { 'gitube:library:repometadata': JSON.stringify({ later: [
+    { repo: completeRepo, at: 123 },
+    { repo: {
+      nameWithOwner: 'Owner/Partial', name: {}, owner: '', id: 1, ownerId: false, ownerType: {}, ownerAvatar: [],
+      description: {}, url: 2, homepageUrl: [], stars: '12', forks: -1, language: {}, languageColor: [],
+      topics: ['python', null, 42], pushedAt: 7, createdAt: null, viewerHasStarred: 'true', coverImage: {},
+      isArchived: 1, license: [], defaultBranch: {},
+    }, at: -1 },
+  ] }) })
+})
+
+test('unusable repo identities are filtered independently across all stored collections', () => {
+  const items = [
+    null, 1, [], {}, { repo: null }, { repo: [] }, { repo: {} },
+    ...['', ' ', 'Owner', 'Owner/', '/Project', 'Owner/Too/Many', 'Owner/Bad Name', 7]
+      .map(nameWithOwner => ({ repo: { nameWithOwner, topics: [] }, at: 1 })),
+    { repo: { nameWithOwner: 'Owner/Keep' } },
+  ]
+  withLibrary((actions, values, flush) => {
+    actions.load('DamagedEntries')
+    const state = useLibrary.getState()
+    for (const saved of [state.folders[0].items, state.later, state.history]) {
+      assert.equal(saved.length, 1)
+      assert.equal(saved[0].repo.nameWithOwner, 'Owner/Keep')
+    }
+    flush()
+    const saved = JSON.parse(values.get('gitube:library:damagedentries'))
+    assert.equal(saved.folders[0].items.length, 1)
+    assert.equal(saved.later.length, 1)
+    assert.equal(saved.history.length, 1)
+  }, { 'gitube:library:damagedentries': JSON.stringify({
+    folders: [{ id: 'default', name: 'Favorites', createdAt: 1, items }], later: items, history: items,
+  }) })
+})

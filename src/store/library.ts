@@ -104,11 +104,51 @@ function recentDwell(value: unknown, now: number): Record<string, number> {
   return Object.fromEntries(Object.entries(recent).sort((a, b) => b[1] - a[1]).slice(0, MAX_DWELL_RECORDED))
 }
 
+function savedRepo(value: unknown): Repo | null {
+  if (!isRecord(value) || typeof value.nameWithOwner !== 'string') return null
+  const nameWithOwner = value.nameWithOwner.trim()
+  if (!validRepoKey(nameWithOwner)) return null
+  const [owner, name] = nameWithOwner.split('/')
+  const text = (field: unknown, fallback = '') => typeof field === 'string' ? field : fallback
+  const nullableText = (field: unknown) => typeof field === 'string' ? field : null
+  const count = (field: unknown) => typeof field === 'number' && Number.isFinite(field) && field >= 0 ? field : 0
+  return {
+    ...value,
+    id: text(value.id),
+    nameWithOwner,
+    name: text(value.name, name) || name,
+    owner: text(value.owner, owner) || owner,
+    ownerId: text(value.ownerId),
+    ownerType: value.ownerType === 'Organization' ? 'Organization' : 'User',
+    ownerAvatar: text(value.ownerAvatar),
+    description: nullableText(value.description),
+    url: text(value.url, `https://github.com/${nameWithOwner}`),
+    homepageUrl: nullableText(value.homepageUrl),
+    stars: count(value.stars),
+    forks: count(value.forks),
+    language: nullableText(value.language),
+    languageColor: nullableText(value.languageColor),
+    topics: strings(value.topics),
+    pushedAt: nullableText(value.pushedAt),
+    createdAt: text(value.createdAt, '1970-01-01T00:00:00.000Z'),
+    viewerHasStarred: value.viewerHasStarred === true,
+    coverImage: nullableText(value.coverImage),
+    isArchived: value.isArchived === true,
+    license: nullableText(value.license),
+    defaultBranch: nullableText(value.defaultBranch),
+  }
+}
+
 function savedItems(value: unknown): SavedItem[] {
   if (!Array.isArray(value)) return []
-  return value.filter((item): item is SavedItem => isRecord(item) && isRecord(item.repo) &&
-    typeof item.repo.nameWithOwner === 'string' && Array.isArray(item.repo.topics) &&
-    typeof item.at === 'number' && Number.isFinite(item.at))
+  return value.flatMap((item): SavedItem[] => {
+    if (!isRecord(item)) return []
+    const repo = savedRepo(item.repo)
+    if (!repo) return []
+    // 旧快照可能缺元数据；只丢弃无法识别仓库的条目，避免下次保存永久丢失收藏。
+    const at = typeof item.at === 'number' && Number.isFinite(item.at) && item.at >= 0 ? item.at : 0
+    return [{ ...item, repo, at }]
+  })
 }
 
 function loadData(login: string): LibraryData {
@@ -124,9 +164,13 @@ function loadData(login: string): LibraryData {
     data.history = savedItems(parsed.history).slice(0, MAX_HISTORY)
     if (Array.isArray(parsed.folders)) {
       data.folders = parsed.folders.filter((folder): folder is Record<string, unknown> =>
-        isRecord(folder) && typeof folder.id === 'string' && typeof folder.name === 'string' &&
-        typeof folder.createdAt === 'number' && Number.isFinite(folder.createdAt),
-      ).map((folder) => ({ id: folder.id as string, name: folder.name as string, createdAt: folder.createdAt as number, items: savedItems(folder.items) }))
+        isRecord(folder) && typeof folder.id === 'string' && typeof folder.name === 'string',
+      ).map((folder) => ({
+        id: folder.id as string,
+        name: folder.name as string,
+        createdAt: typeof folder.createdAt === 'number' && Number.isFinite(folder.createdAt) && folder.createdAt >= 0 ? folder.createdAt : 0,
+        items: savedItems(folder.items),
+      }))
     }
     if (!data.folders.some((f) => f.id === DEFAULT_FOLDER_ID)) {
       data.folders.unshift(emptyData().folders[0])
