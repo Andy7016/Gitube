@@ -3,21 +3,21 @@ import { searchRepos } from '../api/github'
 import type { FeedItem, FollowingStar, Repo } from '../api/types'
 import { findChannel } from '../lib/channels'
 import { getEngine } from '../lib/recommend'
+import type { RecommendationMode } from '../lib/recommendationMode'
 import { useAuth } from './auth'
-import { useLibrary, type DislikeReason } from './library'
+import { useLibrary, type DislikeReason, type LibraryData } from './library'
 import { useSeeds } from './seeds'
 import { isStarredNow } from './stars'
 
-/**
- * 每个频道的信息流状态。放在全局 store 里，
- * 这样从详情页返回首页时，列表和滚动位置都还在（和刷视频网站的体验一致）。
- */
+/** 本次应用运行中的列表和滚动位置，按账号、频道、推荐模式隔离。 */
 export interface ChannelFeed {
   items: FeedItem[]
   status: 'idle' | 'loading' | 'error' | 'end'
   error: string | null
   cursor: string | null
   scrollY: number
+  /** 换批时让网格重新开始；普通分页不改变它。 */
+  snapshot: number
 }
 
 export interface Dismissed {
@@ -25,16 +25,45 @@ export interface Dismissed {
   reason: DislikeReason
 }
 
-const emptyChannel = (): ChannelFeed => ({ items: [], status: 'idle', error: null, cursor: null, scrollY: 0 })
+export function feedKey(login: string, channelId: string, mode: RecommendationMode = 'normal'): string {
+  return JSON.stringify([login.toLowerCase(), channelId, channelId === 'foryou' ? mode : 'normal'])
+}
+
+/** 保留刚操作的撤销卡片，同时立即隐藏缓存中的其他屏蔽和已 Star 内容。 */
+export function visibleFeedItems(
+  items: FeedItem[],
+  lib: Pick<LibraryData, 'dislikedRepos' | 'blockedTopics' | 'blockedLangs'>,
+  isStarred: (repo: Repo) => boolean,
+  dismissed: Record<string, Dismissed> = {},
+): FeedItem[] {
+  const disliked = new Set(lib.dislikedRepos.map((name) => name.toLowerCase()))
+  const topics = new Set(lib.blockedTopics)
+  const langs = new Set(lib.blockedLangs)
+  return items.filter(({ repo }) => !isStarred(repo) && (dismissed[repo.nameWithOwner] || (
+    !disliked.has(repo.nameWithOwner.toLowerCase()) &&
+    !(repo.language && langs.has(repo.language)) &&
+    !repo.topics.some((topic) => topics.has(topic))
+  )))
+}
+
+/** 整批被反馈筛除时显示空态，不能当成尚未加载的第一页。 */
+export function feedDisplayStatus(feed: ChannelFeed | undefined, visibleCount: number): ChannelFeed['status'] {
+  if (feed?.items.length && !visibleCount && feed.status === 'idle') return 'end'
+  return feed?.status ?? 'idle'
+}
+
+let snapshot = 0
+const emptyChannel = (): ChannelFeed => ({ items: [], status: 'idle', error: null, cursor: null, scrollY: 0, snapshot: ++snapshot })
 
 interface FeedState {
   channels: Record<string, ChannelFeed>
-  /** 点了「不感兴趣」的仓库 -> 提示文字和原因（用于撤销） */
+  /** 刚点了不感兴趣的仓库 -> 提示和原因（用于撤销）。 */
   dismissed: Record<string, Dismissed>
-  loadMore: (channelId: string) => Promise<void>
-  refresh: (channelId: string) => Promise<void>
-  saveScroll: (channelId: string, y: number) => void
-  clearChannel: (channelId: string) => void
+  activate: (channelId: string, mode?: RecommendationMode) => void
+  loadMore: (channelId: string, mode?: RecommendationMode) => Promise<void>
+  refresh: (channelId: string, mode?: RecommendationMode) => Promise<void>
+  saveScroll: (channelId: string, y: number, mode?: RecommendationMode, login?: string) => void
+  clearChannel: (channelId: string, mode?: RecommendationMode) => void
   dismiss: (name: string, d: Dismissed) => void
   undismiss: (name: string) => void
   resetAll: () => void
@@ -43,9 +72,10 @@ interface FeedState {
 function groupFollowing(list: FollowingStar[]): FeedItem[] {
   const byRepo = new Map<string, { repo: Repo; users: FollowingStar[] }>()
   for (const f of list) {
-    const e = byRepo.get(f.repo.nameWithOwner) ?? { repo: f.repo, users: [] }
+    const key = f.repo.nameWithOwner.toLowerCase()
+    const e = byRepo.get(key) ?? { repo: f.repo, users: [] }
     e.users.push(f)
-    byRepo.set(f.repo.nameWithOwner, e)
+    byRepo.set(key, e)
   }
   return [...byRepo.values()].map(({ repo, users }) => ({
     key: `follow:${repo.nameWithOwner}`,
@@ -59,78 +89,145 @@ function groupFollowing(list: FollowingStar[]): FeedItem[] {
 }
 
 export const useFeed = create<FeedState>((set, get) => {
-  const patch = (id: string, p: Partial<ChannelFeed>) =>
-    set({ channels: { ...get().channels, [id]: { ...(get().channels[id] ?? emptyChannel()), ...p } } })
+  let generation = 0
+  let activeKey: string | null = null
+  const keyGenerations = new Map<string, number>()
+  const currentMode = () => useLibrary.getState().recommendationMode
+  const currentKey = (channelId: string, mode = currentMode()) =>
+    feedKey(useAuth.getState().viewer?.login ?? '', channelId, mode)
+  const patch = (key: string, p: Partial<ChannelFeed>) =>
+    set({ channels: { ...get().channels, [key]: { ...(get().channels[key] ?? emptyChannel()), ...p } } })
+  const invalidatePending = () => {
+    generation++
+    // 失效请求不会再写状态；缓存也不能永久留在 loading。
+    const channels = { ...get().channels }
+    let changed = false
+    for (const [key, feed] of Object.entries(channels)) {
+      if (feed.status !== 'loading') continue
+      channels[key] = { ...feed, status: 'idle', error: null }
+      changed = true
+    }
+    if (changed) set({ channels })
+  }
+
+  useAuth.subscribe((auth, prev) => {
+    if (auth.viewer?.login.toLowerCase() === prev.viewer?.login.toLowerCase() && auth.token === prev.token) return
+    activeKey = null
+    invalidatePending()
+    set({ dismissed: {} })
+  })
+  useLibrary.subscribe((lib, prev) => {
+    if (lib.recommendationRevision !== prev.recommendationRevision) {
+      get().resetAll()
+    } else if (lib.recommendationMode !== prev.recommendationMode) {
+      activeKey = null
+      invalidatePending()
+    }
+  })
 
   return {
     channels: {},
     dismissed: {},
 
-    async loadMore(channelId) {
-      const cur = get().channels[channelId] ?? emptyChannel()
+    activate(channelId, mode = currentMode()) {
+      const key = currentKey(channelId, mode)
+      if (key === activeKey) return
+      activeKey = key
+      invalidatePending()
+    },
+
+    async loadMore(channelId, mode = currentMode()) {
+      // 已卸载网格排队的 observer 回调不能重新激活旧模式。
+      if (channelId === 'foryou' && mode !== currentMode()) return
+      get().activate(channelId, mode)
+      const auth = useAuth.getState()
+      const login = auth.viewer?.login
+      const key = currentKey(channelId, mode)
+      const cur = get().channels[key] ?? emptyChannel()
       if (cur.status === 'loading' || cur.status === 'end') return
-      patch(channelId, { status: 'loading', error: null })
+      const requestGeneration = generation
+      const keyGeneration = keyGenerations.get(key) ?? 0
+      const revision = useLibrary.getState().recommendationRevision
+      const isCurrent = () => generation === requestGeneration &&
+        (keyGenerations.get(key) ?? 0) === keyGeneration &&
+        useAuth.getState().viewer?.login.toLowerCase() === login?.toLowerCase() &&
+        useAuth.getState().token === auth.token &&
+        useLibrary.getState().recommendationRevision === revision &&
+        (channelId !== 'foryou' || useLibrary.getState().recommendationMode === mode)
+      patch(key, { ...cur, status: 'loading', error: null })
 
       try {
-        const lib = useLibrary.getState()
-        let newItems: FeedItem[] = []
-        let cursor: string | null = cur.cursor
+        if (!login) throw new Error('还没有登录')
+        let newItems: FeedItem[]
+        let cursor = cur.cursor
         let end = false
 
         if (channelId === 'foryou') {
-          const login = useAuth.getState().viewer?.login
-          if (!login) throw new Error('还没有登录')
           const [seeds, following] = await Promise.all([
             useSeeds.getState().loadSeeds(),
             useSeeds.getState().loadFollowing(),
           ])
-          newItems = await getEngine(login).next({
+          if (!isCurrent()) return
+          newItems = await getEngine(login, mode).next({
             seeds,
             following,
             lib: useLibrary.getState(),
             isStarred: isStarredNow,
+            isCurrent,
           })
-          useLibrary.getState().markSeen(newItems.map((i) => i.repo.nameWithOwner))
+          if (!isCurrent()) return
+          useLibrary.getState().markSeen(newItems.map((item) => item.repo.nameWithOwner))
           end = newItems.length === 0
         } else if (channelId === 'following') {
           const following = await useSeeds.getState().loadFollowing()
+          if (!isCurrent()) return
           newItems = groupFollowing(following)
           end = true
         } else {
-          const ch = findChannel(channelId, lib.interests)
+          const ch = findChannel(channelId, useLibrary.getState().interests)
           if (!ch.query) throw new Error('未知频道')
           const page = await searchRepos(ch.query(), cur.cursor, 18)
-          const disliked = new Set(lib.dislikedRepos)
-          newItems = page.repos
-            .filter((r) => !disliked.has(r.nameWithOwner))
-            .map((repo) => ({ key: `${channelId}:${repo.nameWithOwner}`, repo }))
+          if (!isCurrent()) return
+          newItems = page.repos.map((repo) => ({ key: `${channelId}:${repo.nameWithOwner}`, repo }))
           cursor = page.endCursor
           end = !page.hasNextPage
         }
 
-        // 和已有列表去重
-        const latest = get().channels[channelId] ?? emptyChannel()
-        const existing = new Set(latest.items.map((i) => i.repo.nameWithOwner))
-        const merged = [...latest.items, ...newItems.filter((i) => !existing.has(i.repo.nameWithOwner))]
-        patch(channelId, { items: merged, cursor, status: end ? 'end' : 'idle' })
+        if (!isCurrent()) return
+        const latest = get().channels[key] ?? cur
+        const existing = new Set(latest.items.map((item) => item.repo.nameWithOwner.toLowerCase()))
+        const merged = [...latest.items]
+        for (const item of newItems) {
+          const name = item.repo.nameWithOwner.toLowerCase()
+          if (existing.has(name)) continue
+          existing.add(name)
+          merged.push(item)
+        }
+        patch(key, { items: merged, cursor, status: end ? 'end' : 'idle' })
       } catch (err) {
-        patch(channelId, { status: 'error', error: err instanceof Error ? err.message : String(err) })
+        if (!isCurrent()) return
+        patch(key, { status: 'error', error: err instanceof Error ? err.message : String(err) })
       }
     },
 
-    async refresh(channelId) {
-      patch(channelId, { ...emptyChannel() })
-      if (channelId === 'following') useSeeds.setState({ following: null })
-      await get().loadMore(channelId)
+    async refresh(channelId, mode = currentMode()) {
+      if (channelId === 'foryou' && mode !== currentMode()) return
+      const key = currentKey(channelId, mode)
+      keyGenerations.set(key, (keyGenerations.get(key) ?? 0) + 1)
+      patch(key, emptyChannel())
+      if (channelId === 'following') useSeeds.getState().clearFollowing()
+      await get().loadMore(channelId, mode)
     },
 
-    saveScroll(channelId, y) {
-      const ch = get().channels[channelId]
-      if (ch) ch.scrollY = y // 不触发重新渲染
+    saveScroll(channelId, y, mode = currentMode(), login = useAuth.getState().viewer?.login ?? '') {
+      const ch = get().channels[feedKey(login, channelId, mode)]
+      if (ch) ch.scrollY = y // 高频滚动不触发渲染。
     },
 
-    clearChannel(channelId) {
-      const { [channelId]: _drop, ...rest } = get().channels
+    clearChannel(channelId, mode = currentMode()) {
+      const key = currentKey(channelId, mode)
+      keyGenerations.set(key, (keyGenerations.get(key) ?? 0) + 1)
+      const { [key]: _drop, ...rest } = get().channels
       set({ channels: rest })
     },
 
@@ -143,6 +240,9 @@ export const useFeed = create<FeedState>((set, get) => {
     },
 
     resetAll() {
+      generation++
+      activeKey = null
+      keyGenerations.clear()
       set({ channels: {}, dismissed: {} })
     },
   }

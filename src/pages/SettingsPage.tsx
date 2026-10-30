@@ -5,7 +5,8 @@ import { useApiMeta } from '../api/github'
 import { Avatar } from '../components/Avatar'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { InterestPicker } from '../components/InterestPicker'
-import { buildProfile, getEngine, topTopics } from '../lib/recommend'
+import { RecommendationModePicker } from '../components/RecommendationModePicker'
+import { buildProfile, resetEngines, topTopics } from '../lib/recommend'
 import { getTheme, setTheme, type Theme } from '../lib/theme'
 import { useAuth } from '../store/auth'
 import { useFeed } from '../store/feed'
@@ -81,13 +82,10 @@ function Interests() {
   return (
     <section className="panel" id="interests" aria-labelledby="interests-title">
       <h2 id="interests-title">兴趣方向</h2>
-      <p className="panel__lead">选中的方向会出现在首页频道栏，也会让推荐更偏向这些内容。</p>
+      <p className="panel__lead">选中的方向会出现在首页频道栏，也会让推荐更偏向这些内容。修改会用于后续分页或换批，当前已加载的列表会保留。</p>
       <InterestPicker
         selected={interests}
-        onChange={(ids) => {
-          setInterests(ids)
-          useFeed.getState().clearChannel('foryou')
-        }}
+        onChange={setInterests}
       />
     </section>
   )
@@ -95,11 +93,13 @@ function Interests() {
 
 function ProfileView() {
   const seeds = useSeeds((s) => s.seeds)
+  const following = useSeeds((s) => s.following)
   const lib = useLibrary()
   useEffect(() => {
     useSeeds.getState().loadSeeds().catch(() => {})
+    useSeeds.getState().loadFollowing().catch(() => {})
   }, [])
-  const profile = useMemo(() => buildProfile(seeds, lib), [seeds, lib])
+  const profile = useMemo(() => buildProfile(seeds, lib, following ?? []), [seeds, lib, following])
   const topics = topTopics(profile, 14)
   const langs = [...profile.langW.entries()].filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]).slice(0, 6)
   const max = topics[0]?.[1] ?? 1
@@ -109,7 +109,7 @@ function ProfileView() {
     <section className="panel" aria-labelledby="profile-title">
       <h2 id="profile-title">Gitube 眼中的你</h2>
       <p className="panel__lead">
-        根据你最近 Star 的 {seeds?.starred.length ?? '…'} 个项目、选的兴趣和在这里的操作算出来的。推荐主要从这些方向里找。
+        根据你最近 Star 的 {seeds?.starred.length ?? '…'} 个项目、选的兴趣、关注者的 Star 采样和在这里的操作算出来的。正常推荐主要从这些方向里找。
       </p>
       {topics.length === 0 ? (
         <p className="muted">还没有足够的数据，先去首页刷一会儿。</p>
@@ -147,6 +147,65 @@ function ProfileView() {
   )
 }
 
+function FollowingWeights() {
+  const following = useSeeds((s) => s.following)
+  const weights = useLibrary((s) => s.followingWeights)
+  const setWeight = useLibrary((s) => s.setFollowingWeight)
+  useEffect(() => {
+    useSeeds.getState().loadFollowing().catch(() => {})
+  }, [])
+  const people = useMemo(() => {
+    const byLogin = new Map<string, { login: string; avatarUrl: string; count: number }>()
+    for (const star of following ?? []) {
+      const key = star.login.toLowerCase()
+      const person = byLogin.get(key) ?? { login: star.login, avatarUrl: star.avatarUrl, count: 0 }
+      person.count++
+      byLogin.set(key, person)
+    }
+    return [...byLogin.values()].sort((a, b) => a.login.localeCompare(b.login))
+  }, [following])
+
+  return (
+    <section className="panel" aria-labelledby="following-weights-title">
+      <h2 id="following-weights-title">关注者的推荐影响</h2>
+      <p className="panel__lead">调整这些关注者的 Star 对正常推荐画像和社交推荐的影响。默认 1 倍，0 倍表示不参与推荐；修改会用于后续分页或换批。</p>
+      <p className="panel__fine">Gitube 当前最多采样 50 位关注者，每人最近 6 个 Star。这里只列出本次实际取得 Star 样本的账号，不保证覆盖全部关注者或他们的全部兴趣。设为 0 不会取消 GitHub 关注，也不会清空原来的「关注」频道。</p>
+      {following === null ? (
+        <p className="muted" role="status">正在读取关注者的 Star 采样…</p>
+      ) : people.length === 0 ? (
+        <p className="muted">当前没有可用的关注者 Star 样本。</p>
+      ) : (
+        <ul className="following-weights">
+          {people.map(({ login, avatarUrl, count }) => {
+            const weight = weights[login.toLowerCase()] ?? 1
+            const inputId = `following-weight-${login.toLowerCase()}`
+            return (
+              <li className="following-weight" key={login.toLowerCase()}>
+                <Avatar src={avatarUrl} name={login} size={32} />
+                <label className="following-weight__person" htmlFor={inputId}>
+                  <strong>@{login}</strong>
+                  <span>{count} 个 Star 样本</span>
+                </label>
+                <input
+                  id={inputId}
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="0.25"
+                  value={weight}
+                  aria-valuetext={`${weight} 倍推荐影响`}
+                  onChange={(event) => setWeight(login, Number(event.target.value))}
+                />
+                <output htmlFor={inputId}>{weight} 倍</output>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function Blocked() {
   const blockedTopics = useLibrary((s) => s.blockedTopics)
   const blockedLangs = useLibrary((s) => s.blockedLangs)
@@ -179,14 +238,14 @@ function Blocked() {
         confirmText="确认重置？再点一次"
         onConfirm={() => {
           resetRecommendations()
-          if (login) getEngine(login).reset()
+          if (login) resetEngines(login)
           useFeed.getState().resetAll()
           toast('推荐记录已重置，回首页看看新的推荐')
         }}
       >
         重置推荐记录
       </ConfirmButton>
-      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐过的记录和在本应用里的操作偏好；收藏夹、稍后再看和历史记录不受影响。</p>
+      <p className="panel__fine">会清空不感兴趣、屏蔽、已推荐记录、操作偏好、有效阅读学习记录、关注者权重和所有模式的分页进度，并恢复正常推荐；收藏夹、稍后再看和历史记录不受影响。</p>
     </section>
   )
 }
@@ -233,6 +292,12 @@ export function SettingsPage() {
       <h1 className="page-title">偏好设置</h1>
       <Account />
       <Interests />
+      <section className="panel" aria-labelledby="mode-title">
+        <h2 id="mode-title">推荐模式</h2>
+        <RecommendationModePicker />
+        <p className="panel__fine">与首页共用设置。每种模式会保留本次应用运行中的列表和浏览位置，切回时继续浏览。</p>
+      </section>
+      <FollowingWeights />
       <ProfileView />
       <Blocked />
       <Appearance />
