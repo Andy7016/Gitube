@@ -99,19 +99,6 @@ npm run desktop:build   # 在本机打包安装包，输出在 src-tauri/target/
 - **桌面版**（`release.yml`）：到仓库 **Actions → 发布桌面软件 → Run workflow**，大约 15 分钟后，Releases 页面会出现各系统的安装包。
   发新版本前，先把 `src-tauri/tauri.conf.json` 里的 `"version"` 改大（比如 `0.1.0` → `0.2.0`），否则会传到同一个版本里。
 
-## 用 GitHub OAuth 登录（可选，仅本地开发）
-
-想在本地开发时用「使用 GitHub 账号登录」按钮：
-
-1. 打开 https://github.com/settings/applications/new
-   - Homepage URL：`http://localhost:5173`
-   - Authorization callback URL：`http://localhost:5173/`
-2. 创建后复制 Client ID，再点 Generate a new client secret
-3. 把 `.env.example` 复制成 `.env`，填上 `VITE_GITHUB_CLIENT_ID` 和 `GITHUB_CLIENT_SECRET`
-4. 重新 `npm run dev`
-
-用授权码换 token 必须带 client secret，这一步由 `vite.config.ts` 里挂在开发服务器上的小接口完成，secret 不会打包进前端。网页版没有服务器，所以只提供 Token 登录；桌面版用的设备码登录不需要 client secret，见上面「第一次使用」。
-
 ## 推荐是怎么算的
 
 全部在本地完成，网页版与桌面版共用 `src/lib/recommend.ts`。正常推荐按以下流程运行：
@@ -154,7 +141,7 @@ src/
 src-tauri/             桌面版（Tauri）：窗口配置、图标、Rust 入口（代发 GitHub 登录请求）
 .github/workflows/     自动发布网页版和桌面版
 app-icon.png           图标原图；改了以后运行 npx tauri icon 重新生成各尺寸
-vite.config.ts         Vite 配置 + 本地开发用的 OAuth 换 token 接口
+vite.config.ts         Vite 配置
 ```
 
 ## 常见问题

@@ -6,7 +6,6 @@ import { useAuth } from './store/auth'
 import { useLibrary } from './store/library'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
-import { OAuthCallback } from './pages/OAuthCallback'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { RepoPage } from './pages/RepoPage'
 import { HistoryPage, LaterPage, SavedPage, StarsPage } from './pages/LibraryPages'
@@ -41,10 +40,6 @@ function ScrollToTop() {
  * 网页版放在 GitHub Pages 的子路径下、桌面版从本地文件加载，都不需要服务器做路由回退。
  */
 export function App() {
-  // GitHub OAuth 授权后会带着 ?code=...&state=... 跳回首页
-  const params = new URLSearchParams(window.location.search)
-  if (params.has('code') && params.has('state')) return <OAuthCallback />
-
   return (
     <HashRouter>
       <ScrollToTop />
