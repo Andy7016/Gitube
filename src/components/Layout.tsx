@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { ArrowLeft, Bookmark, Clock, History, House, Menu, Search, Settings, Star, UserRound } from 'lucide-react'
+import { ArrowLeft, Bookmark, Clock, GitBranch, History, House, Menu, Search, Settings, Star, UserRound } from 'lucide-react'
 import { useAuth } from '../store/auth'
 import { useLibrary } from '../store/library'
 import { Avatar } from './Avatar'
@@ -65,6 +65,7 @@ function SearchBox({ onDone }: { onDone?: () => void }) {
 
 const NAV = [
   { to: '/', label: '首页', icon: House, end: true },
+  { to: '/graph', label: '技术图谱', icon: GitBranch },
   { to: '/later', label: '稍后再看', icon: Clock },
   { to: '/saved', label: '收藏夹', icon: Bookmark },
   { to: '/stars', label: '我的 Star', icon: Star },
@@ -134,6 +135,7 @@ export function Layout() {
               <SearchBox />
             </div>
             <div className="topbar__end">
+              <Link to="/graph" className="icon-btn show-mobile" aria-label="技术图谱"><GitBranch size={20} aria-hidden="true" /></Link>
               <button
                 type="button"
                 className="icon-btn show-mobile"

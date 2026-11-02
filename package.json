@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test": "node --import ./tests/register.mjs --test tests/*.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
